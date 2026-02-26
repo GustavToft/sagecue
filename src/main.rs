@@ -1,13 +1,13 @@
 mod app;
 mod aws;
 mod event;
+mod handler;
 mod model;
 mod polling;
 mod ui;
 
 use anyhow::Result;
 use clap::Parser;
-use crossterm::event::{KeyCode, KeyModifiers};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
@@ -21,6 +21,7 @@ use tokio::sync::{mpsc, watch};
 use app::{App, AppMode};
 use aws::client::AwsClients;
 use event::{AppEvent, EventHandler};
+use handler::Action;
 
 const REGION: &str = "eu-west-1";
 
@@ -104,7 +105,9 @@ async fn run_app(
                 // --latest: auto-select first execution
                 if cli.latest && !app.executions.is_empty() {
                     let arn = app.executions[0].arn.clone();
-                    start_monitoring(&mut app, &arn, &arn_tx, &step_tx)?;
+                    let step_name = app.enter_monitoring(&arn);
+                    arn_tx.send(arn)?;
+                    step_tx.send(step_name)?;
                 }
             }
             Err(e) => {
@@ -128,166 +131,69 @@ async fn run_app(
 
     // Main event loop
     loop {
-        // Draw
         terminal.draw(|f| ui::draw(f, &app))?;
 
         // Drain poll results (non-blocking)
         while let Ok(result) = poll_result_rx.try_recv() {
-            app.execution = Some(result.execution);
-            app.update_steps(result.steps);
-            app.maybe_follow_executing_step();
-
-            // Update log cache
-            if let (Some(step_name), Some(stream_state)) =
-                (result.log_step_name, result.log_stream_state)
-            {
-                app.log_viewer
-                    .per_step_cache
-                    .insert(step_name, stream_state);
-            }
+            app.apply_poll_result(result);
         }
 
-        // Handle events
         match events.next().await? {
             AppEvent::Key(key) => {
-                // Ctrl+C always quits
-                if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c')
-                {
-                    break;
-                }
-
-                // q always quits
-                if key.code == KeyCode::Char('q') {
-                    break;
-                }
-
-                match app.mode {
-                    AppMode::SelectPipeline => match key.code {
-                        KeyCode::Esc => break,
-                        KeyCode::Up => app.pipeline_cursor_up(),
-                        KeyCode::Down => app.pipeline_cursor_down(),
-                        KeyCode::Enter => {
-                            if let Some(name) = app.selected_pipeline_name() {
-                                let name = name.to_string();
-                                app.selected_pipeline_name = Some(name.clone());
-                                app.mode = AppMode::SelectExecution;
-                                app.loading = true;
-                                app.execution_cursor = 0;
-                                app.error_message = None;
-
-                                match aws::sagemaker::list_executions(
-                                    &clients.sagemaker,
-                                    &name,
-                                    20,
-                                )
-                                .await
-                                {
-                                    Ok(execs) => {
-                                        app.executions = execs;
-                                        app.loading = false;
-                                    }
-                                    Err(e) => {
-                                        app.error_message = Some(format!("{:#}", e));
-                                        app.loading = false;
-                                    }
-                                }
+                match handler::handle_key(&mut app, key, cli.pipeline.is_some()) {
+                    Action::None => {}
+                    Action::Quit => break,
+                    Action::LoadExecutions { pipeline_name } => {
+                        match aws::sagemaker::list_executions(
+                            &clients.sagemaker,
+                            &pipeline_name,
+                            20,
+                        )
+                        .await
+                        {
+                            Ok(execs) => {
+                                app.executions = execs;
+                                app.loading = false;
+                            }
+                            Err(e) => {
+                                app.error_message = Some(format!("{:#}", e));
+                                app.loading = false;
                             }
                         }
-                        _ => {}
-                    },
-                    AppMode::SelectExecution => match key.code {
-                        KeyCode::Esc => {
-                            if cli.pipeline.is_none() {
-                                app.mode = AppMode::SelectPipeline;
-                                app.error_message = None;
-                            } else {
-                                break;
+                    }
+                    Action::StartMonitoring { arn, step_name } => {
+                        arn_tx.send(arn)?;
+                        step_tx.send(step_name)?;
+                        let _ = force_tx.send(());
+                    }
+                    Action::ForceRefresh => {
+                        let _ = force_tx.send(());
+                    }
+                    Action::StepChanged { step_name } => {
+                        let _ = step_tx.send(step_name);
+                    }
+                    Action::BackToExecutions { pipeline_name } => {
+                        if !pipeline_name.is_empty() {
+                            if let Ok(execs) = aws::sagemaker::list_executions(
+                                &clients.sagemaker,
+                                &pipeline_name,
+                                20,
+                            )
+                            .await
+                            {
+                                app.executions = execs;
                             }
                         }
-                        KeyCode::Up => app.execution_cursor_up(),
-                        KeyCode::Down => app.execution_cursor_down(),
-                        KeyCode::Enter => {
-                            if let Some(arn) = app.selected_execution_arn() {
-                                let arn = arn.to_string();
-                                start_monitoring(&mut app, &arn, &arn_tx, &step_tx)?;
-                                let _ = force_tx.send(());
-                            }
-                        }
-                        _ => {}
-                    },
-                    AppMode::Monitoring => match key.code {
-                        KeyCode::Esc => {
-                            app.mode = AppMode::SelectExecution;
-                            app.execution_cursor = 0;
-                            // Refresh execution list
-                            if let Some(ref pipeline_name) = app.selected_pipeline_name {
-                                if let Ok(execs) = aws::sagemaker::list_executions(
-                                    &clients.sagemaker,
-                                    pipeline_name,
-                                    20,
-                                )
-                                .await
-                                {
-                                    app.executions = execs;
-                                }
-                            }
-                        }
-                        KeyCode::Up => {
-                            app.select_step_up();
-                            let _ = step_tx.send(app.selected_step_name().unwrap_or_default().to_string());
-                        }
-                        KeyCode::Down => {
-                            app.select_step_down();
-                            let _ = step_tx.send(app.selected_step_name().unwrap_or_default().to_string());
-                        }
-                        KeyCode::Char('j') => {
-                            let name = app.selected_step_name().unwrap_or_default().to_string();
-                            app.log_viewer.scroll_down(&name, 3);
-                        }
-                        KeyCode::Char('k') => {
-                            app.log_viewer.scroll_up(3);
-                        }
-                        KeyCode::Char('G') => {
-                            let name = app.selected_step_name().unwrap_or_default().to_string();
-                            app.log_viewer.jump_to_end(&name);
-                        }
-                        KeyCode::Char('g') => {
-                            app.log_viewer.jump_to_start();
-                        }
-                        KeyCode::Char('r') => {
-                            let _ = force_tx.send(());
-                        }
-                        _ => {}
-                    },
+                    }
                 }
             }
-            AppEvent::Tick => {
-                // Just triggers a redraw (for updated timers etc.)
-            }
+            AppEvent::Tick => {}
         }
 
         if app.should_quit {
             break;
         }
     }
-
-    Ok(())
-}
-
-fn start_monitoring(
-    app: &mut App,
-    arn: &str,
-    arn_tx: &watch::Sender<String>,
-    step_tx: &watch::Sender<String>,
-) -> Result<()> {
-    app.mode = AppMode::Monitoring;
-    app.auto_follow = true;
-    app.selected_step = 0;
-    app.log_viewer = model::logs::LogViewerState::new();
-
-    // Tell poll task which execution and step to monitor
-    arn_tx.send(arn.to_string())?;
-    step_tx.send(app.selected_step_name().unwrap_or_default().to_string())?;
 
     Ok(())
 }

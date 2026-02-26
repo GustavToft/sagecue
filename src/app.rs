@@ -2,6 +2,7 @@ use crate::model::execution::{ExecutionSummary, PipelineExecution};
 use crate::model::logs::LogViewerState;
 use crate::model::pipeline::PipelineSummary;
 use crate::model::step::{StepInfo, StepStatus};
+use crate::polling::PollResult;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppMode {
@@ -147,5 +148,40 @@ impl App {
                 return;
             }
         }
+    }
+
+    /// Apply a poll result from the background polling task.
+    pub fn apply_poll_result(&mut self, result: PollResult) {
+        self.execution = Some(result.execution);
+        self.update_steps(result.steps);
+        self.maybe_follow_executing_step();
+
+        if let (Some(step_name), Some(stream_state)) =
+            (result.log_step_name, result.log_stream_state)
+        {
+            self.log_viewer.per_step_cache.insert(step_name, stream_state);
+        }
+    }
+
+    /// Transition into monitoring mode. Returns the initial step name for the poller.
+    pub fn enter_monitoring(&mut self, _arn: &str) -> String {
+        self.mode = AppMode::Monitoring;
+        self.auto_follow = true;
+        self.selected_step = 0;
+        self.log_viewer = LogViewerState::new();
+        self.selected_step_name().unwrap_or_default().to_string()
+    }
+
+    /// Transition back to execution selection.
+    pub fn enter_select_execution(&mut self) {
+        self.mode = AppMode::SelectExecution;
+        self.execution_cursor = 0;
+        self.error_message = None;
+    }
+
+    /// Transition back to pipeline selection.
+    pub fn enter_select_pipeline(&mut self) {
+        self.mode = AppMode::SelectPipeline;
+        self.error_message = None;
     }
 }
