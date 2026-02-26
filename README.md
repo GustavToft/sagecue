@@ -6,6 +6,7 @@ A furnace transforms raw material through intense heat — **furnace** watches y
 
 ## Features
 
+- **Pipeline browser** — Browse all SageMaker pipelines in your account
 - **Execution browser** — List and select from recent pipeline executions, color-coded by status
 - **Live step tracking** — Watch pipeline steps progress in real-time with auto-follow on the active step
 - **Log streaming** — Stream CloudWatch logs per step with scrollable history and auto-scroll
@@ -30,12 +31,21 @@ furnace --pipeline my-pipeline --region us-east-1
 
 ## Keybindings
 
+### Pipeline Selection
+
+| Key       | Action              |
+|-----------|---------------------|
+| `↑` `↓`  | Navigate pipelines  |
+| `Enter`   | View executions     |
+| `q` `Esc` | Quit                |
+
 ### Execution Selection
 
 | Key       | Action              |
 |-----------|---------------------|
 | `↑` `↓`  | Navigate executions |
 | `Enter`   | Monitor execution   |
+| `p`       | Back to pipelines   |
 | `q` `Esc` | Quit                |
 
 ### Monitoring
@@ -53,7 +63,12 @@ furnace --pipeline my-pipeline --region us-east-1
 ## Requirements
 
 - Rust 2021 edition
-- AWS credentials configured (via environment, profile, or IAM role)
+- AWS credentials configured — we recommend [Granted](https://docs.commonfate.io/granted/getting-started) for assuming roles:
+  ```bash
+  assume <your-profile>
+  furnace
+  ```
+  Standard credential sources (environment variables, `~/.aws/credentials`, IAM roles) also work.
 - Access to SageMaker and CloudWatch Logs APIs
 
 ## Architecture
@@ -69,11 +84,13 @@ src/
 │   ├── sagemaker.rs    # SageMaker API calls
 │   └── cloudwatch.rs   # CloudWatch Logs streaming
 ├── model/
+│   ├── pipeline.rs     # Pipeline summary types
 │   ├── execution.rs    # Pipeline execution types
 │   ├── step.rs         # Step status types
 │   └── logs.rs         # Log stream state
 └── ui/
     ├── header.rs       # Execution info header
+    ├── pipeline_list.rs    # Pipeline selector table
     ├── execution_list.rs   # Execution selector table
     ├── steps.rs        # Step status table
     ├── logs.rs         # Scrollable log viewer
@@ -107,22 +124,11 @@ Trigger operations directly from the TUI — pipeline control without leaving th
 - [ ] Invocation feedback in status bar (invoking / success / error)
 - [ ] Built-in actions: start pipeline, stop execution, re-run failed step
 
-### v0.4 — Multi-Pipeline Overview
+### v0.4 — Standalone Release
 
-Monitor multiple pipelines from a single dashboard.
-
-- [ ] Pipeline overview screen — list all SageMaker pipelines with latest execution status
-- [ ] Auto-discover pipelines in the account/region
-- [ ] At-a-glance health: running, succeeded, failed counts per pipeline
-- [ ] Drill down into any pipeline from the overview (existing execution/step/log flow)
-- [ ] Optional filter/search across pipelines
-
-### v0.5 — Standalone Release
-
-Extract to its own repository and make fully configurable.
+Make fully configurable and publishable.
 
 - [ ] Config file (TOML) — pipelines, region, MLFlow URL, actions
-- [ ] Remove all hardcoded pipeline-specific values
 - [ ] Generic SageMaker pipeline support (auto-discover steps)
 - [ ] `cargo install furnace` via crates.io
 - [ ] CI/CD with GitHub Actions (build, test, release binaries)
