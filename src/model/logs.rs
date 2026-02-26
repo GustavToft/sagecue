@@ -50,7 +50,10 @@ impl LogViewerState {
 
     pub fn scroll_down(&mut self, step_name: &str, amount: usize) {
         let total = self.entries_for_step(step_name).len();
-        self.scroll_offset = self.scroll_offset.saturating_add(amount).min(total.saturating_sub(1));
+        if total == 0 {
+            return;
+        }
+        self.scroll_offset = self.scroll_offset.saturating_add(amount).min(total - 1);
         self.auto_scroll = false;
     }
 

@@ -22,14 +22,9 @@ impl EventHandler {
             loop {
                 // Poll with tick_rate timeout
                 if event::poll(tick_rate).unwrap_or(false) {
-                    if let Ok(evt) = event::read() {
-                        match evt {
-                            CrosstermEvent::Key(key) => {
-                                if tx.send(AppEvent::Key(key)).is_err() {
-                                    return;
-                                }
-                            }
-                            _ => {}
+                    if let Ok(CrosstermEvent::Key(key)) = event::read() {
+                        if tx.send(AppEvent::Key(key)).is_err() {
+                            return;
                         }
                     }
                 } else {

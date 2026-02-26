@@ -52,7 +52,7 @@ pub async fn list_executions(
             display_name: s.pipeline_execution_display_name().map(|s| s.to_string()),
             status: s
                 .pipeline_execution_status()
-                .map(|s| ExecutionStatus::from_str(s.as_str()))
+                .map(|s| s.as_str().parse::<ExecutionStatus>().unwrap())
                 .unwrap_or(ExecutionStatus::Unknown("Unknown".to_string())),
             start_time: s.start_time().and_then(to_chrono),
         })
@@ -78,7 +78,7 @@ pub async fn describe_execution(
             .map(|s| s.to_string()),
         status: resp
             .pipeline_execution_status()
-            .map(|s| ExecutionStatus::from_str(s.as_str()))
+            .map(|s| s.as_str().parse::<ExecutionStatus>().unwrap())
             .unwrap_or(ExecutionStatus::Unknown("Unknown".to_string())),
         created: resp.creation_time().and_then(to_chrono),
         last_modified: resp.last_modified_time().and_then(to_chrono),
@@ -165,7 +165,7 @@ pub async fn list_steps(client: &Client, execution_arn: &str) -> Result<Vec<Step
             let name = s.step_name().unwrap_or_default().to_string();
             let status = s
                 .step_status()
-                .map(|st| StepStatus::from_str(st.as_str()))
+                .map(|st| st.as_str().parse::<StepStatus>().unwrap())
                 .unwrap_or(StepStatus::NotStarted);
             let start_time = s.start_time().and_then(to_chrono);
             let end_time = s.end_time().and_then(to_chrono);

@@ -12,17 +12,21 @@ pub enum StepStatus {
     Unknown(String),
 }
 
-impl StepStatus {
-    pub fn from_str(s: &str) -> Self {
-        match s {
+impl std::str::FromStr for StepStatus {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
             "Executing" => Self::Executing,
             "Succeeded" => Self::Succeeded,
             "Failed" => Self::Failed,
             "Stopped" => Self::Stopped,
             other => Self::Unknown(other.to_string()),
-        }
+        })
     }
+}
 
+impl StepStatus {
     pub fn as_str(&self) -> &str {
         match self {
             Self::NotStarted => "Not Started",
@@ -140,18 +144,22 @@ mod tests {
 
     // --- StepStatus ---
 
+    fn parse_step_status(s: &str) -> StepStatus {
+        s.parse().unwrap()
+    }
+
     #[test]
     fn status_from_str_known_variants() {
-        assert_eq!(StepStatus::from_str("Executing"), StepStatus::Executing);
-        assert_eq!(StepStatus::from_str("Succeeded"), StepStatus::Succeeded);
-        assert_eq!(StepStatus::from_str("Failed"), StepStatus::Failed);
-        assert_eq!(StepStatus::from_str("Stopped"), StepStatus::Stopped);
+        assert_eq!(parse_step_status("Executing"), StepStatus::Executing);
+        assert_eq!(parse_step_status("Succeeded"), StepStatus::Succeeded);
+        assert_eq!(parse_step_status("Failed"), StepStatus::Failed);
+        assert_eq!(parse_step_status("Stopped"), StepStatus::Stopped);
     }
 
     #[test]
     fn status_from_str_unknown() {
         assert_eq!(
-            StepStatus::from_str("Banana"),
+            parse_step_status("Banana"),
             StepStatus::Unknown("Banana".to_string())
         );
     }
@@ -159,7 +167,7 @@ mod tests {
     #[test]
     fn status_as_str_roundtrip() {
         for s in ["Executing", "Succeeded", "Failed", "Stopped"] {
-            assert_eq!(StepStatus::from_str(s).as_str(), s);
+            assert_eq!(parse_step_status(s).as_str(), s);
         }
     }
 

@@ -10,18 +10,22 @@ pub enum ExecutionStatus {
     Unknown(String),
 }
 
-impl ExecutionStatus {
-    pub fn from_str(s: &str) -> Self {
-        match s {
+impl std::str::FromStr for ExecutionStatus {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
             "Executing" => Self::Executing,
             "Succeeded" => Self::Succeeded,
             "Failed" => Self::Failed,
             "Stopped" => Self::Stopped,
             "Stopping" => Self::Stopping,
             other => Self::Unknown(other.to_string()),
-        }
+        })
     }
+}
 
+impl ExecutionStatus {
     pub fn as_str(&self) -> &str {
         match self {
             Self::Executing => "Executing",
@@ -55,33 +59,34 @@ pub struct PipelineExecution {
 mod tests {
     use super::*;
 
+    fn parse(s: &str) -> ExecutionStatus {
+        s.parse().unwrap()
+    }
+
     #[test]
     fn from_str_known_variants() {
-        assert_eq!(ExecutionStatus::from_str("Executing"), ExecutionStatus::Executing);
-        assert_eq!(ExecutionStatus::from_str("Succeeded"), ExecutionStatus::Succeeded);
-        assert_eq!(ExecutionStatus::from_str("Failed"), ExecutionStatus::Failed);
-        assert_eq!(ExecutionStatus::from_str("Stopped"), ExecutionStatus::Stopped);
-        assert_eq!(ExecutionStatus::from_str("Stopping"), ExecutionStatus::Stopping);
+        assert_eq!(parse("Executing"), ExecutionStatus::Executing);
+        assert_eq!(parse("Succeeded"), ExecutionStatus::Succeeded);
+        assert_eq!(parse("Failed"), ExecutionStatus::Failed);
+        assert_eq!(parse("Stopped"), ExecutionStatus::Stopped);
+        assert_eq!(parse("Stopping"), ExecutionStatus::Stopping);
     }
 
     #[test]
     fn from_str_unknown_fallback() {
-        assert_eq!(
-            ExecutionStatus::from_str("Banana"),
-            ExecutionStatus::Unknown("Banana".to_string())
-        );
+        assert_eq!(parse("Banana"), ExecutionStatus::Unknown("Banana".to_string()));
     }
 
     #[test]
     fn as_str_roundtrip() {
         for variant in ["Executing", "Succeeded", "Failed", "Stopped", "Stopping"] {
-            assert_eq!(ExecutionStatus::from_str(variant).as_str(), variant);
+            assert_eq!(parse(variant).as_str(), variant);
         }
     }
 
     #[test]
     fn unknown_as_str_preserves_value() {
-        let status = ExecutionStatus::from_str("CustomStatus");
+        let status = parse("CustomStatus");
         assert_eq!(status.as_str(), "CustomStatus");
     }
 }
