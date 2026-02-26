@@ -105,32 +105,50 @@ Async event loop built on **tokio** with watch channels for command dispatch and
 
 ## Roadmap
 
-### v0.2 — MLFlow Integration
+### v0.2 — CLI Commands
 
-Pull training metrics directly from MLFlow instead of parsing them from CloudWatch logs.
+Non-TUI commands for scripting, CI, and quick access.
+
+- [ ] `furnace run` — start a pipeline execution from the shell (with optional parameter overrides)
+- [ ] `furnace status` — one-liner showing latest execution status (exit code reflects pass/fail)
+- [ ] `furnace status --watch` — poll until execution completes, with desktop notification on finish/failure
+
+### v0.3 — MLFlow Integration
+
+Pull training metrics from SageMaker's managed MLFlow tracking server instead of parsing CloudWatch logs.
 
 - [ ] Add HTTP client (`reqwest`) for MLFlow REST API (`/api/2.0/mlflow/...`)
+- [ ] Connect to SageMaker managed MLFlow endpoint (auto-discover or `--mlflow-url`)
 - [ ] Link SageMaker steps to MLFlow runs (via job name tag or run metadata)
 - [ ] New metrics panel — show loss, mAP, epoch progress alongside logs
 - [ ] Sparkline/chart widgets for metric trends using ratatui built-ins
-- [ ] `--mlflow-url` CLI arg (default `http://localhost:5000`)
+- [ ] Run comparison — select two executions and diff their metrics/params side by side
+- [ ] Artifact browser — list models/files a run produced without digging through S3
 - [ ] Poll metrics on the same async interval as step status
 
-### v0.3 — Actions (Lambda Invocations)
+### v0.4 — Pipeline Control
 
 Trigger operations directly from the TUI — pipeline control without leaving the terminal.
 
-- [ ] Add `aws-sdk-lambda` for function invocation
-- [ ] Action registry — configurable list of Lambda actions with display name, ARN, and payload template
-- [ ] Action picker UI — `a` key opens action menu with confirmation dialog
+- [ ] Start a new execution (with parameter overrides)
+- [ ] Stop a running execution
+- [ ] Retry a failed execution
+- [ ] Action picker UI — confirmation dialog before destructive operations
 - [ ] Invocation feedback in status bar (invoking / success / error)
-- [ ] Built-in actions: start pipeline, stop execution, re-run failed step
 
-### v0.4 — Standalone Release
+### v0.5 — Notifications
+
+Desktop alerts so you don't have to stare at the terminal.
+
+- [ ] Desktop notification when a long-running execution finishes or fails
+- [ ] Configurable notification rules (notify on failure only, always, never)
+- [ ] macOS native notifications via `osascript` / `notify-send` on Linux
+
+### v0.6 — Standalone Release
 
 Make fully configurable and publishable.
 
-- [ ] Config file (TOML) — pipelines, region, MLFlow URL, actions
+- [ ] Config file (TOML) — pipelines, region, MLFlow URL, notification prefs
 - [ ] Generic SageMaker pipeline support (auto-discover steps)
 - [ ] `cargo install furnace` via crates.io
 - [ ] CI/CD with GitHub Actions (build, test, release binaries)
