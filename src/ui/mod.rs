@@ -61,5 +61,5 @@ fn draw_monitor(f: &mut Frame, app: &App) {
     header::draw(f, app, chunks[0]);
     steps::draw(f, app, chunks[1]);
     logs::draw(f, app, chunks[2]);
-    status_bar::draw_monitor_bar(f, chunks[3], app.notifications_enabled);
+    status_bar::draw_monitor_bar(f, chunks[3], app.notifications_enabled, app.background_watcher_count);
 }

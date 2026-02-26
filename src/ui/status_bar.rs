@@ -20,7 +20,7 @@ fn key_span(key: &str, desc: &str) -> Vec<Span<'static>> {
     ]
 }
 
-pub fn draw_monitor_bar(f: &mut Frame, area: Rect, notifications_enabled: bool) {
+pub fn draw_monitor_bar(f: &mut Frame, area: Rect, notifications_enabled: bool, watcher_count: usize) {
     let mut spans: Vec<Span> = Vec::new();
     spans.extend(key_span("Esc", "Back"));
     spans.extend(key_span("q", "Quit"));
@@ -38,6 +38,12 @@ pub fn draw_monitor_bar(f: &mut Frame, area: Rect, notifications_enabled: bool) 
         spans.push(Span::styled(
             "[OFF] ",
             Style::default().fg(Color::Rgb(80, 80, 80)),
+        ));
+    }
+    if watcher_count > 0 {
+        spans.push(Span::styled(
+            format!("Watch: {} ", watcher_count),
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
         ));
     }
 

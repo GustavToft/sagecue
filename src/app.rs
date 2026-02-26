@@ -28,6 +28,7 @@ pub struct App {
     pub error_message: Option<String>,
     pub loading: bool,
     pub notifications_enabled: bool,
+    pub background_watcher_count: usize,
 }
 
 impl App {
@@ -48,6 +49,7 @@ impl App {
             error_message: None,
             loading: true,
             notifications_enabled: false,
+            background_watcher_count: 0,
         }
     }
 

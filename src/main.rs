@@ -82,6 +82,16 @@ async fn run_app(
     app.notifications_enabled = cli.notify;
     let mut events = EventHandler::new(Duration::from_millis(250));
 
+    // Track the current monitoring ARN for spawning background watchers
+    let mut current_monitoring_arn: Option<String> = None;
+
+    // Background notification watchers
+    struct BackgroundWatcher {
+        arn: String,
+        handle: tokio::task::JoinHandle<()>,
+    }
+    let mut watchers: Vec<BackgroundWatcher> = Vec::new();
+
     // Channels for polling task
     let (arn_tx, arn_rx) = watch::channel(String::new());
     let (step_tx, step_rx) = watch::channel(String::new());
@@ -112,6 +122,7 @@ async fn run_app(
                 if cli.latest && !app.executions.is_empty() {
                     let arn = app.executions[0].arn.clone();
                     let step_name = app.enter_monitoring(&arn);
+                    current_monitoring_arn = Some(arn.clone());
                     arn_tx.send(arn)?;
                     step_tx.send(step_name)?;
                 }
@@ -168,6 +179,17 @@ async fn run_app(
                         }
                     }
                     Action::StartMonitoring { arn, step_name } => {
+                        // Abort any existing background watcher for this ARN
+                        watchers.retain(|w| {
+                            if w.arn == arn {
+                                w.handle.abort();
+                                false
+                            } else {
+                                true
+                            }
+                        });
+                        current_monitoring_arn = Some(arn.clone());
+                        app.background_watcher_count = watchers.len();
                         arn_tx.send(arn)?;
                         step_tx.send(step_name)?;
                         let _ = force_tx.send(());
@@ -182,6 +204,25 @@ async fn run_app(
                         app.toggle_notifications();
                     }
                     Action::BackToExecutions { pipeline_name } => {
+                        // Spawn background watcher if notifications are enabled
+                        if app.notifications_enabled {
+                            if let Some(ref arn) = current_monitoring_arn {
+                                let handle = notify::spawn_background_watcher(
+                                    clients.clone(),
+                                    arn.clone(),
+                                    pipeline_name.clone(),
+                                    app.steps.clone(),
+                                    app.execution.clone(),
+                                );
+                                watchers.push(BackgroundWatcher {
+                                    arn: arn.clone(),
+                                    handle,
+                                });
+                            }
+                        }
+                        current_monitoring_arn = None;
+                        app.background_watcher_count = watchers.len();
+
                         if !pipeline_name.is_empty() {
                             if let Ok(execs) = aws::sagemaker::list_executions(
                                 &clients.sagemaker,
@@ -196,7 +237,11 @@ async fn run_app(
                     }
                 }
             }
-            AppEvent::Tick => {}
+            AppEvent::Tick => {
+                // Clean up finished background watchers
+                watchers.retain(|w| !w.handle.is_finished());
+                app.background_watcher_count = watchers.len();
+            }
         }
 
         if app.should_quit {

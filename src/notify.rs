@@ -1,3 +1,4 @@
+use crate::aws::client::AwsClients;
 use crate::model::execution::{ExecutionStatus, PipelineExecution};
 use crate::model::step::{StepInfo, StepStatus};
 
@@ -84,6 +85,70 @@ pub fn detect_execution_transition(
         }
         _ => None,
     }
+}
+
+pub fn spawn_background_watcher(
+    clients: AwsClients,
+    execution_arn: String,
+    pipeline_name: String,
+    initial_steps: Vec<StepInfo>,
+    initial_execution: Option<PipelineExecution>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut prev_steps = initial_steps;
+        let mut prev_execution = initial_execution;
+
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+
+            // Fetch current execution status
+            let execution = match crate::aws::sagemaker::describe_execution(
+                &clients.sagemaker,
+                &execution_arn,
+            )
+            .await
+            {
+                Ok(exec) => exec,
+                Err(_) => continue,
+            };
+
+            // Fetch current steps
+            let steps = match crate::aws::sagemaker::list_steps(
+                &clients.sagemaker,
+                &execution_arn,
+            )
+            .await
+            {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+
+            // Detect and send step transition notifications
+            let step_events = detect_step_transitions(&prev_steps, &steps);
+            for event in &step_events {
+                send(event);
+            }
+
+            // Detect and send execution transition notifications
+            if let Some(ref old_exec) = prev_execution {
+                if let Some(event) =
+                    detect_execution_transition(old_exec, &execution, &pipeline_name)
+                {
+                    send(&event);
+                }
+            }
+
+            // Check if execution reached terminal state
+            let terminal = is_execution_terminal(&execution.status);
+
+            prev_steps = steps;
+            prev_execution = Some(execution);
+
+            if terminal {
+                break;
+            }
+        }
+    })
 }
 
 pub fn send(event: &NotificationEvent) {
