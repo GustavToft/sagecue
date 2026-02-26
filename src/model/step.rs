@@ -1,11 +1,6 @@
 use chrono::{DateTime, Utc};
 
-pub const PIPELINE_STEPS: [&str; 4] = [
-    "ValidateDataset",
-    "TrainYOLOv8",
-    "CompileForHailo",
-    "ReorganizeFiles",
-];
+use super::format::format_duration;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StepStatus {
@@ -44,6 +39,38 @@ impl StepStatus {
 pub enum JobType {
     Training,
     Processing,
+    Transform,
+}
+
+#[derive(Debug, Clone)]
+pub enum StepType {
+    Training,
+    Processing,
+    Transform,
+    Condition,
+    RegisterModel,
+    Lambda,
+    Fail,
+    Unknown(String),
+}
+
+impl StepType {
+    pub fn has_job(&self) -> bool {
+        matches!(self, Self::Training | Self::Processing | Self::Transform)
+    }
+
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Training => "Training",
+            Self::Processing => "Processing",
+            Self::Transform => "Transform",
+            Self::Condition => "Condition",
+            Self::RegisterModel => "RegisterModel",
+            Self::Lambda => "Lambda",
+            Self::Fail => "Fail",
+            Self::Unknown(s) => s.as_str(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -58,6 +85,7 @@ pub struct JobDetails {
 #[derive(Debug, Clone)]
 pub struct StepInfo {
     pub name: String,
+    pub step_type: StepType,
     pub status: StepStatus,
     pub start_time: Option<DateTime<Utc>>,
     pub end_time: Option<DateTime<Utc>>,
@@ -66,9 +94,10 @@ pub struct StepInfo {
 }
 
 impl StepInfo {
-    pub fn new(name: &str) -> Self {
+    pub fn new(name: &str, step_type: StepType) -> Self {
         Self {
             name: name.to_string(),
+            step_type,
             status: StepStatus::NotStarted,
             start_time: None,
             end_time: None,
@@ -83,18 +112,7 @@ impl StepInfo {
             None => return "--".to_string(),
         };
         let end = self.end_time.unwrap_or_else(Utc::now);
-        let dur = end - start;
-        let secs = dur.num_seconds();
-        if secs < 0 {
-            return "--".to_string();
-        }
-        let mins = secs / 60;
-        let remaining_secs = secs % 60;
-        if mins > 0 {
-            format!("{}m {:02}s", mins, remaining_secs)
-        } else {
-            format!("{}s", remaining_secs)
-        }
+        format_duration((end - start).num_seconds())
     }
 
     pub fn start_time_str(&self) -> String {

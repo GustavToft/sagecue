@@ -1,7 +1,7 @@
 use crate::model::execution::{ExecutionSummary, PipelineExecution};
 use crate::model::logs::LogViewerState;
 use crate::model::pipeline::PipelineSummary;
-use crate::model::step::{StepInfo, StepStatus, PIPELINE_STEPS};
+use crate::model::step::{StepInfo, StepStatus};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppMode {
@@ -29,7 +29,6 @@ pub struct App {
 
 impl App {
     pub fn new() -> Self {
-        let steps = PIPELINE_STEPS.iter().map(|&name| StepInfo::new(name)).collect();
         Self {
             mode: AppMode::SelectPipeline,
             pipelines: Vec::new(),
@@ -38,7 +37,7 @@ impl App {
             executions: Vec::new(),
             execution_cursor: 0,
             execution: None,
-            steps,
+            steps: Vec::new(),
             selected_step: 0,
             auto_follow: true,
             log_viewer: LogViewerState::new(),
@@ -48,8 +47,8 @@ impl App {
         }
     }
 
-    pub fn selected_step_name(&self) -> &str {
-        &self.steps[self.selected_step].name
+    pub fn selected_step_name(&self) -> Option<&str> {
+        self.steps.get(self.selected_step).map(|s| s.name.as_str())
     }
 
     pub fn select_step_up(&mut self) {
@@ -61,7 +60,7 @@ impl App {
     }
 
     pub fn select_step_down(&mut self) {
-        if self.selected_step < self.steps.len() - 1 {
+        if !self.steps.is_empty() && self.selected_step < self.steps.len().saturating_sub(1) {
             self.selected_step += 1;
             self.auto_follow = false;
             self.on_step_changed();
@@ -104,10 +103,34 @@ impl App {
             .map(|p| p.name.as_str())
     }
 
+    /// Update steps from a poll result, preserving the current selection by step name.
+    pub fn update_steps(&mut self, new_steps: Vec<StepInfo>) {
+        let prev_name = self.selected_step_name().map(|s| s.to_string());
+
+        self.steps = new_steps;
+
+        // Try to restore selection by name
+        if let Some(ref name) = prev_name {
+            if let Some(pos) = self.steps.iter().position(|s| s.name == *name) {
+                self.selected_step = pos;
+                return;
+            }
+        }
+
+        // Clamp selection to valid range
+        if self.steps.is_empty() {
+            self.selected_step = 0;
+        } else if self.selected_step >= self.steps.len() {
+            self.selected_step = self.steps.len() - 1;
+        }
+    }
+
     fn on_step_changed(&mut self) {
         // Reset scroll to end for the new step
-        let step_name = self.steps[self.selected_step].name.clone();
-        self.log_viewer.jump_to_end(&step_name);
+        if let Some(name) = self.selected_step_name() {
+            let name = name.to_string();
+            self.log_viewer.jump_to_end(&name);
+        }
     }
 
     /// Auto-follow: if enabled, move selection to the currently executing step

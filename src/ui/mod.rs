@@ -52,7 +52,7 @@ fn draw_monitor(f: &mut Frame, app: &App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(5),  // header
-            Constraint::Length(6 + app.steps.len() as u16), // step table
+            Constraint::Length(6 + app.steps.len().max(1) as u16), // step table
             Constraint::Min(5),    // logs
             Constraint::Length(1), // status bar
         ])

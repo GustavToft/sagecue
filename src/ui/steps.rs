@@ -33,6 +33,7 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
     let header = Row::new(vec![
         Cell::from(" # "),
         Cell::from("Step"),
+        Cell::from("Type"),
         Cell::from("Status"),
         Cell::from("Start"),
         Cell::from("Duration"),
@@ -43,6 +44,40 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
             .fg(Color::Cyan)
             .add_modifier(Modifier::BOLD),
     );
+
+    let widths = [
+        Constraint::Length(3),
+        Constraint::Length(28),
+        Constraint::Length(13),
+        Constraint::Length(16),
+        Constraint::Length(10),
+        Constraint::Length(10),
+        Constraint::Min(10),
+    ];
+
+    if app.steps.is_empty() {
+        let empty_row = Row::new(vec![
+            Cell::from(""),
+            Cell::from("Loading...").style(Style::default().fg(Color::DarkGray)),
+            Cell::from(""),
+            Cell::from(""),
+            Cell::from(""),
+            Cell::from(""),
+            Cell::from(""),
+        ]);
+
+        let table = Table::new(vec![empty_row], widths)
+            .header(header)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" Steps ")
+                    .border_style(Style::default().fg(Color::Cyan)),
+            );
+
+        f.render_widget(table, area);
+        return;
+    }
 
     let rows: Vec<Row> = app
         .steps
@@ -68,6 +103,7 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
             Row::new(vec![
                 Cell::from(format!("{}{}", prefix, i + 1)),
                 Cell::from(step.name.clone()),
+                Cell::from(step.step_type.as_str()),
                 Cell::from(status_text).style(Style::default().fg(color)),
                 Cell::from(step.start_time_str()),
                 Cell::from(step.duration_str()),
@@ -76,15 +112,6 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
             .style(style)
         })
         .collect();
-
-    let widths = [
-        Constraint::Length(3),
-        Constraint::Length(18),
-        Constraint::Length(16),
-        Constraint::Length(10),
-        Constraint::Length(10),
-        Constraint::Min(10),
-    ];
 
     let table = Table::new(rows, widths)
         .header(header)

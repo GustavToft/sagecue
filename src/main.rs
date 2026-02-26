@@ -134,7 +134,7 @@ async fn run_app(
         // Drain poll results (non-blocking)
         while let Ok(result) = poll_result_rx.try_recv() {
             app.execution = Some(result.execution);
-            app.steps = result.steps;
+            app.update_steps(result.steps);
             app.maybe_follow_executing_step();
 
             // Update log cache
@@ -234,21 +234,21 @@ async fn run_app(
                         }
                         KeyCode::Up => {
                             app.select_step_up();
-                            let _ = step_tx.send(app.selected_step_name().to_string());
+                            let _ = step_tx.send(app.selected_step_name().unwrap_or_default().to_string());
                         }
                         KeyCode::Down => {
                             app.select_step_down();
-                            let _ = step_tx.send(app.selected_step_name().to_string());
+                            let _ = step_tx.send(app.selected_step_name().unwrap_or_default().to_string());
                         }
                         KeyCode::Char('j') => {
-                            let name = app.selected_step_name().to_string();
+                            let name = app.selected_step_name().unwrap_or_default().to_string();
                             app.log_viewer.scroll_down(&name, 3);
                         }
                         KeyCode::Char('k') => {
                             app.log_viewer.scroll_up(3);
                         }
                         KeyCode::Char('G') => {
-                            let name = app.selected_step_name().to_string();
+                            let name = app.selected_step_name().unwrap_or_default().to_string();
                             app.log_viewer.jump_to_end(&name);
                         }
                         KeyCode::Char('g') => {
@@ -287,7 +287,7 @@ fn start_monitoring(
 
     // Tell poll task which execution and step to monitor
     arn_tx.send(arn.to_string())?;
-    step_tx.send(app.selected_step_name().to_string())?;
+    step_tx.send(app.selected_step_name().unwrap_or_default().to_string())?;
 
     Ok(())
 }

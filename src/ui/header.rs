@@ -7,6 +7,7 @@ use ratatui::Frame;
 
 use crate::app::App;
 use crate::model::execution::ExecutionStatus;
+use crate::model::format::format_duration;
 
 fn status_color(status: &ExecutionStatus) -> Color {
     match status {
@@ -47,19 +48,14 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
         .unwrap_or_else(|| "--".to_string());
 
     let updated_ago = exec.last_modified.map(|t| {
-        let diff = Utc::now() - t;
-        let secs = diff.num_seconds();
-        if secs < 60 {
-            format!("{}s ago", secs)
-        } else {
-            format!("{}m {}s ago", secs / 60, secs % 60)
-        }
+        let ago = format_duration((Utc::now() - t).num_seconds());
+        format!("{} ago", ago)
     }).unwrap_or_else(|| "--".to_string());
 
     let lines = vec![
         Line::from(vec![
             Span::styled("Pipeline: ", Style::default().fg(Color::Cyan)),
-            Span::raw("factbird-edge-ml-pipeline"),
+            Span::raw(app.selected_pipeline_name.as_deref().unwrap_or("<unknown>")),
         ]),
         Line::from(vec![
             Span::styled("Execution: ", Style::default().fg(Color::Cyan)),

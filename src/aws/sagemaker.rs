@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 
 use crate::model::execution::{ExecutionStatus, ExecutionSummary, PipelineExecution};
 use crate::model::pipeline::PipelineSummary;
-use crate::model::step::{JobDetails, JobType, StepInfo, StepStatus, PIPELINE_STEPS};
+use crate::model::step::{JobDetails, JobType, StepInfo, StepStatus, StepType};
 
 fn to_chrono(dt: &aws_sdk_sagemaker::primitives::DateTime) -> Option<DateTime<Utc>> {
     DateTime::from_timestamp(dt.secs(), dt.subsec_nanos())
@@ -87,6 +87,71 @@ pub async fn describe_execution(
     })
 }
 
+/// Extract step type and optional job details from step metadata.
+fn extract_step_type_and_job(
+    meta: &aws_sdk_sagemaker::types::PipelineExecutionStepMetadata,
+) -> (StepType, Option<JobDetails>) {
+    if let Some(training) = meta.training_job() {
+        let job_details = training.arn().map(|arn| {
+            let job_name = arn.rsplit('/').next().unwrap_or_default().to_string();
+            JobDetails {
+                job_type: JobType::Training,
+                job_arn: arn.to_string(),
+                job_name,
+                secondary_status: None,
+                instance_type: None,
+            }
+        });
+        return (StepType::Training, job_details);
+    }
+
+    if let Some(processing) = meta.processing_job() {
+        let job_details = processing.arn().map(|arn| {
+            let job_name = arn.rsplit('/').next().unwrap_or_default().to_string();
+            JobDetails {
+                job_type: JobType::Processing,
+                job_arn: arn.to_string(),
+                job_name,
+                secondary_status: None,
+                instance_type: None,
+            }
+        });
+        return (StepType::Processing, job_details);
+    }
+
+    if let Some(transform) = meta.transform_job() {
+        let job_details = transform.arn().map(|arn| {
+            let job_name = arn.rsplit('/').next().unwrap_or_default().to_string();
+            JobDetails {
+                job_type: JobType::Transform,
+                job_arn: arn.to_string(),
+                job_name,
+                secondary_status: None,
+                instance_type: None,
+            }
+        });
+        return (StepType::Transform, job_details);
+    }
+
+    if meta.condition().is_some() {
+        return (StepType::Condition, None);
+    }
+
+    if meta.register_model().is_some() {
+        return (StepType::RegisterModel, None);
+    }
+
+    if meta.lambda().is_some() {
+        return (StepType::Lambda, None);
+    }
+
+    if meta.fail().is_some() {
+        return (StepType::Fail, None);
+    }
+
+    (StepType::Unknown("Unknown".to_string()), None)
+}
+
 pub async fn list_steps(client: &Client, execution_arn: &str) -> Result<Vec<StepInfo>> {
     let resp = client
         .list_pipeline_execution_steps()
@@ -95,67 +160,45 @@ pub async fn list_steps(client: &Client, execution_arn: &str) -> Result<Vec<Step
         .await
         .context("Failed to list pipeline execution steps")?;
 
-    let api_steps = resp.pipeline_execution_steps();
-
-    // Build step info for each known pipeline step, preserving order
-    let steps = PIPELINE_STEPS
+    let mut steps: Vec<StepInfo> = resp
+        .pipeline_execution_steps()
         .iter()
-        .map(|&name| {
-            let api_step = api_steps
-                .iter()
-                .find(|s| s.step_name().unwrap_or_default() == name);
+        .map(|s| {
+            let name = s.step_name().unwrap_or_default().to_string();
+            let status = s
+                .step_status()
+                .map(|st| StepStatus::from_str(st.as_str()))
+                .unwrap_or(StepStatus::NotStarted);
+            let start_time = s.start_time().and_then(to_chrono);
+            let end_time = s.end_time().and_then(to_chrono);
+            let failure_reason = s.failure_reason().map(|r| r.to_string());
 
-            match api_step {
-                Some(s) => {
-                    let status = s
-                        .step_status()
-                        .map(|st| StepStatus::from_str(st.as_str()))
-                        .unwrap_or(StepStatus::NotStarted);
+            let (step_type, job_details) = s
+                .metadata()
+                .map(extract_step_type_and_job)
+                .unwrap_or((StepType::Unknown("Unknown".to_string()), None));
 
-                    let start_time = s.start_time().and_then(to_chrono);
-                    let end_time = s.end_time().and_then(to_chrono);
-                    let failure_reason = s.failure_reason().map(|r| r.to_string());
-
-                    // Extract job ARN from metadata
-                    let job_details = s.metadata().and_then(|meta| {
-                        if let Some(training) = meta.training_job() {
-                            let arn = training.arn()?.to_string();
-                            let job_name = arn.rsplit('/').next()?.to_string();
-                            Some(JobDetails {
-                                job_type: JobType::Training,
-                                job_arn: arn,
-                                job_name,
-                                secondary_status: None,
-                                instance_type: None,
-                            })
-                        } else if let Some(processing) = meta.processing_job() {
-                            let arn = processing.arn()?.to_string();
-                            let job_name = arn.rsplit('/').next()?.to_string();
-                            Some(JobDetails {
-                                job_type: JobType::Processing,
-                                job_arn: arn,
-                                job_name,
-                                secondary_status: None,
-                                instance_type: None,
-                            })
-                        } else {
-                            None
-                        }
-                    });
-
-                    StepInfo {
-                        name: name.to_string(),
-                        status,
-                        start_time,
-                        end_time,
-                        failure_reason,
-                        job_details,
-                    }
-                }
-                None => StepInfo::new(name),
+            StepInfo {
+                name,
+                step_type,
+                status,
+                start_time,
+                end_time,
+                failure_reason,
+                job_details,
             }
         })
         .collect();
+
+    // Sort by start_time ascending; steps without a start time go to the end
+    steps.sort_by(|a, b| {
+        match (&a.start_time, &b.start_time) {
+            (Some(ta), Some(tb)) => ta.cmp(tb),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        }
+    });
 
     Ok(steps)
 }
@@ -200,6 +243,23 @@ pub async fn enrich_job_details(client: &Client, step: &mut StepInfo) -> Result<
                     .processing_resources()
                     .and_then(|r| r.cluster_config())
                     .and_then(|c| c.instance_type().map(|t| t.as_str().to_string()));
+            }
+        }
+        JobType::Transform => {
+            let resp = client
+                .describe_transform_job()
+                .transform_job_name(&details.job_name)
+                .send()
+                .await
+                .context("Failed to describe transform job")?;
+
+            if let Some(ref mut d) = step.job_details {
+                d.secondary_status = resp
+                    .transform_job_status()
+                    .map(|s| s.as_str().to_string());
+                d.instance_type = resp
+                    .transform_resources()
+                    .and_then(|r| r.instance_type().map(|t| t.as_str().to_string()));
             }
         }
     }

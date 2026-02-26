@@ -8,6 +8,7 @@ fn log_group_for_job(job: &JobDetails) -> &'static str {
     match job.job_type {
         JobType::Training => "/aws/sagemaker/TrainingJobs",
         JobType::Processing => "/aws/sagemaker/ProcessingJobs",
+        JobType::Transform => "/aws/sagemaker/TransformJobs",
     }
 }
 
