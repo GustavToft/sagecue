@@ -4,7 +4,7 @@ use tokio::sync::{mpsc, watch};
 use crate::aws::client::AwsClients;
 use crate::aws::{cloudwatch, sagemaker};
 use crate::model::execution::PipelineExecution;
-use crate::model::logs::{LogEntry, LogStreamState};
+use crate::model::logs::LogStreamState;
 use crate::model::step::{StepInfo, StepStatus};
 
 /// Result sent from poll task back to the main loop
@@ -13,7 +13,6 @@ pub struct PollResult {
     pub execution: PipelineExecution,
     pub steps: Vec<StepInfo>,
     pub log_step_name: Option<String>,
-    pub new_log_entries: Vec<LogEntry>,
     pub log_stream_state: Option<LogStreamState>,
 }
 
@@ -71,7 +70,6 @@ pub fn spawn_poll_task(
             }
 
             // Tail logs for the selected step
-            let mut new_log_entries = Vec::new();
             let mut log_step_name = None;
             let mut log_stream_state_out = None;
 
@@ -106,8 +104,7 @@ pub fn spawn_poll_task(
                                 )
                                 .await
                             {
-                                state.entries.extend(entries.iter().cloned());
-                                new_log_entries = entries;
+                                state.entries.extend(entries);
                             }
                         }
 
@@ -121,7 +118,6 @@ pub fn spawn_poll_task(
                 execution,
                 steps,
                 log_step_name,
-                new_log_entries,
                 log_stream_state: log_stream_state_out,
             };
 

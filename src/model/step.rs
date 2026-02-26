@@ -55,10 +55,6 @@ pub enum StepType {
 }
 
 impl StepType {
-    pub fn has_job(&self) -> bool {
-        matches!(self, Self::Training | Self::Processing | Self::Transform)
-    }
-
     pub fn as_str(&self) -> &str {
         match self {
             Self::Training => "Training",
@@ -76,7 +72,6 @@ impl StepType {
 #[derive(Debug, Clone)]
 pub struct JobDetails {
     pub job_type: JobType,
-    pub job_arn: String,
     pub job_name: String,
     pub secondary_status: Option<String>,
     pub instance_type: Option<String>,
@@ -94,18 +89,6 @@ pub struct StepInfo {
 }
 
 impl StepInfo {
-    pub fn new(name: &str, step_type: StepType) -> Self {
-        Self {
-            name: name.to_string(),
-            step_type,
-            status: StepStatus::NotStarted,
-            start_time: None,
-            end_time: None,
-            failure_reason: None,
-            job_details: None,
-        }
-    }
-
     pub fn duration_str(&self) -> String {
         let start = match self.start_time {
             Some(t) => t,

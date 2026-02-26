@@ -23,7 +23,6 @@ pub async fn list_pipelines(client: &Client) -> Result<Vec<PipelineSummary>> {
         .iter()
         .map(|p| PipelineSummary {
             name: p.pipeline_name().unwrap_or_default().to_string(),
-            arn: p.pipeline_arn().unwrap_or_default().to_string(),
             description: p.pipeline_description().map(|s| s.to_string()),
             last_execution_time: p.last_execution_time().and_then(to_chrono),
         })
@@ -74,7 +73,6 @@ pub async fn describe_execution(
         .context("Failed to describe pipeline execution")?;
 
     Ok(PipelineExecution {
-        arn: execution_arn.to_string(),
         display_name: resp
             .pipeline_execution_display_name()
             .map(|s| s.to_string()),
@@ -96,7 +94,7 @@ fn extract_step_type_and_job(
             let job_name = arn.rsplit('/').next().unwrap_or_default().to_string();
             JobDetails {
                 job_type: JobType::Training,
-                job_arn: arn.to_string(),
+
                 job_name,
                 secondary_status: None,
                 instance_type: None,
@@ -110,7 +108,7 @@ fn extract_step_type_and_job(
             let job_name = arn.rsplit('/').next().unwrap_or_default().to_string();
             JobDetails {
                 job_type: JobType::Processing,
-                job_arn: arn.to_string(),
+
                 job_name,
                 secondary_status: None,
                 instance_type: None,
@@ -124,7 +122,7 @@ fn extract_step_type_and_job(
             let job_name = arn.rsplit('/').next().unwrap_or_default().to_string();
             JobDetails {
                 job_type: JobType::Transform,
-                job_arn: arn.to_string(),
+
                 job_name,
                 secondary_status: None,
                 instance_type: None,

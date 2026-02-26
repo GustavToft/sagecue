@@ -33,9 +33,6 @@ impl ExecutionStatus {
         }
     }
 
-    pub fn is_terminal(&self) -> bool {
-        matches!(self, Self::Succeeded | Self::Failed | Self::Stopped)
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -48,7 +45,6 @@ pub struct ExecutionSummary {
 
 #[derive(Debug, Clone)]
 pub struct PipelineExecution {
-    pub arn: String,
     pub display_name: Option<String>,
     pub status: ExecutionStatus,
     pub created: Option<DateTime<Utc>>,
