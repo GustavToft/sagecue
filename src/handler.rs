@@ -131,3 +131,168 @@ fn handle_monitoring(app: &mut App, key: KeyEvent) -> Action {
         _ => Action::None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::execution::{ExecutionStatus, ExecutionSummary};
+    use crate::model::pipeline::PipelineSummary;
+    use crate::model::step::{StepInfo, StepStatus, StepType};
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    fn ctrl_c() -> KeyEvent {
+        KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL)
+    }
+
+    fn make_step(name: &str) -> StepInfo {
+        StepInfo {
+            name: name.to_string(),
+            step_type: StepType::Training,
+            status: StepStatus::Succeeded,
+            start_time: None,
+            end_time: None,
+            failure_reason: None,
+            job_details: None,
+        }
+    }
+
+    // --- Global quit ---
+
+    #[test]
+    fn ctrl_c_quits_from_all_modes() {
+        for mode in [AppMode::SelectPipeline, AppMode::SelectExecution, AppMode::Monitoring] {
+            let mut app = App::new();
+            app.mode = mode;
+            assert!(matches!(handle_key(&mut app, ctrl_c(), false), Action::Quit));
+        }
+    }
+
+    #[test]
+    fn q_quits_from_all_modes() {
+        for mode in [AppMode::SelectPipeline, AppMode::SelectExecution, AppMode::Monitoring] {
+            let mut app = App::new();
+            app.mode = mode;
+            assert!(matches!(handle_key(&mut app, key(KeyCode::Char('q')), false), Action::Quit));
+        }
+    }
+
+    // --- SelectPipeline ---
+
+    #[test]
+    fn select_pipeline_esc_quits() {
+        let mut app = App::new();
+        app.mode = AppMode::SelectPipeline;
+        assert!(matches!(handle_key(&mut app, key(KeyCode::Esc), false), Action::Quit));
+    }
+
+    #[test]
+    fn select_pipeline_up_down() {
+        let mut app = App::new();
+        app.mode = AppMode::SelectPipeline;
+        app.pipelines = vec![
+            PipelineSummary { name: "a".into(), description: None, last_execution_time: None },
+            PipelineSummary { name: "b".into(), description: None, last_execution_time: None },
+        ];
+        handle_key(&mut app, key(KeyCode::Down), false);
+        assert_eq!(app.pipeline_cursor, 1);
+        handle_key(&mut app, key(KeyCode::Up), false);
+        assert_eq!(app.pipeline_cursor, 0);
+    }
+
+    #[test]
+    fn select_pipeline_enter_transitions() {
+        let mut app = App::new();
+        app.mode = AppMode::SelectPipeline;
+        app.pipelines = vec![
+            PipelineSummary { name: "my-pipe".into(), description: None, last_execution_time: None },
+        ];
+        let action = handle_key(&mut app, key(KeyCode::Enter), false);
+        assert!(matches!(action, Action::LoadExecutions { pipeline_name } if pipeline_name == "my-pipe"));
+        assert_eq!(app.mode, AppMode::SelectExecution);
+    }
+
+    #[test]
+    fn select_pipeline_enter_empty_is_none() {
+        let mut app = App::new();
+        app.mode = AppMode::SelectPipeline;
+        assert!(matches!(handle_key(&mut app, key(KeyCode::Enter), false), Action::None));
+    }
+
+    // --- SelectExecution ---
+
+    #[test]
+    fn select_execution_esc_goes_back_no_flag() {
+        let mut app = App::new();
+        app.mode = AppMode::SelectExecution;
+        let action = handle_key(&mut app, key(KeyCode::Esc), false);
+        assert!(matches!(action, Action::None));
+        assert_eq!(app.mode, AppMode::SelectPipeline);
+    }
+
+    #[test]
+    fn select_execution_esc_quits_with_flag() {
+        let mut app = App::new();
+        app.mode = AppMode::SelectExecution;
+        assert!(matches!(handle_key(&mut app, key(KeyCode::Esc), true), Action::Quit));
+    }
+
+    #[test]
+    fn select_execution_enter_starts_monitoring() {
+        let mut app = App::new();
+        app.mode = AppMode::SelectExecution;
+        app.executions = vec![ExecutionSummary {
+            arn: "arn:exec:1".into(),
+            display_name: None,
+            status: ExecutionStatus::Succeeded,
+            start_time: None,
+        }];
+        app.steps = vec![make_step("step1")];
+        let action = handle_key(&mut app, key(KeyCode::Enter), false);
+        assert!(matches!(action, Action::StartMonitoring { arn, .. } if arn == "arn:exec:1"));
+        assert_eq!(app.mode, AppMode::Monitoring);
+    }
+
+    // --- Monitoring ---
+
+    #[test]
+    fn monitoring_esc_goes_back() {
+        let mut app = App::new();
+        app.mode = AppMode::Monitoring;
+        app.selected_pipeline_name = Some("pipe".to_string());
+        let action = handle_key(&mut app, key(KeyCode::Esc), false);
+        assert!(matches!(action, Action::BackToExecutions { pipeline_name } if pipeline_name == "pipe"));
+        assert_eq!(app.mode, AppMode::SelectExecution);
+    }
+
+    #[test]
+    fn monitoring_up_down_changes_step() {
+        let mut app = App::new();
+        app.mode = AppMode::Monitoring;
+        app.steps = vec![make_step("a"), make_step("b")];
+        let action = handle_key(&mut app, key(KeyCode::Down), false);
+        assert!(matches!(action, Action::StepChanged { .. }));
+        assert_eq!(app.selected_step, 1);
+    }
+
+    #[test]
+    fn monitoring_r_force_refresh() {
+        let mut app = App::new();
+        app.mode = AppMode::Monitoring;
+        assert!(matches!(handle_key(&mut app, key(KeyCode::Char('r')), false), Action::ForceRefresh));
+    }
+
+    #[test]
+    fn monitoring_j_k_scroll_logs() {
+        let mut app = App::new();
+        app.mode = AppMode::Monitoring;
+        app.steps = vec![make_step("s1")];
+        // j scrolls down (no crash on empty logs)
+        handle_key(&mut app, key(KeyCode::Char('j')), false);
+        // k scrolls up
+        handle_key(&mut app, key(KeyCode::Char('k')), false);
+        assert_eq!(app.log_viewer.scroll_offset, 0);
+    }
+}

@@ -70,3 +70,88 @@ impl LogViewerState {
         self.auto_scroll = false;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn viewer_with_entries(step: &str, count: usize) -> LogViewerState {
+        let mut viewer = LogViewerState::new();
+        let entries: Vec<LogEntry> = (0..count)
+            .map(|i| LogEntry {
+                timestamp: i as i64,
+                message: format!("line {}", i),
+            })
+            .collect();
+        viewer
+            .per_step_cache
+            .insert(step.to_string(), LogStreamState {
+                log_group: "test".to_string(),
+                log_stream: None,
+                entries,
+                next_forward_token: None,
+            });
+        viewer
+    }
+
+    #[test]
+    fn entries_for_missing_step_returns_empty() {
+        let viewer = LogViewerState::new();
+        assert!(viewer.entries_for_step("nonexistent").is_empty());
+    }
+
+    #[test]
+    fn entries_for_step_returns_correct_slice() {
+        let viewer = viewer_with_entries("step1", 5);
+        assert_eq!(viewer.entries_for_step("step1").len(), 5);
+    }
+
+    #[test]
+    fn scroll_down_increments_and_disables_auto() {
+        let mut viewer = viewer_with_entries("s", 10);
+        viewer.scroll_down("s", 3);
+        assert_eq!(viewer.scroll_offset, 3);
+        assert!(!viewer.auto_scroll);
+    }
+
+    #[test]
+    fn scroll_down_caps_at_max() {
+        let mut viewer = viewer_with_entries("s", 5);
+        viewer.scroll_down("s", 100);
+        assert_eq!(viewer.scroll_offset, 4); // 5 - 1
+    }
+
+    #[test]
+    fn scroll_up_saturates_at_zero() {
+        let mut viewer = viewer_with_entries("s", 10);
+        viewer.scroll_offset = 2;
+        viewer.scroll_up(5);
+        assert_eq!(viewer.scroll_offset, 0);
+        assert!(!viewer.auto_scroll);
+    }
+
+    #[test]
+    fn jump_to_end_enables_auto_scroll() {
+        let mut viewer = viewer_with_entries("s", 10);
+        viewer.auto_scroll = false;
+        viewer.jump_to_end("s");
+        assert_eq!(viewer.scroll_offset, 9);
+        assert!(viewer.auto_scroll);
+    }
+
+    #[test]
+    fn jump_to_start_disables_auto_scroll() {
+        let mut viewer = viewer_with_entries("s", 10);
+        viewer.scroll_offset = 5;
+        viewer.jump_to_start();
+        assert_eq!(viewer.scroll_offset, 0);
+        assert!(!viewer.auto_scroll);
+    }
+
+    #[test]
+    fn scroll_down_on_empty_step() {
+        let mut viewer = LogViewerState::new();
+        viewer.scroll_down("empty", 5);
+        assert_eq!(viewer.scroll_offset, 0);
+    }
+}

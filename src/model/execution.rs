@@ -50,3 +50,38 @@ pub struct PipelineExecution {
     pub created: Option<DateTime<Utc>>,
     pub last_modified: Option<DateTime<Utc>>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn from_str_known_variants() {
+        assert_eq!(ExecutionStatus::from_str("Executing"), ExecutionStatus::Executing);
+        assert_eq!(ExecutionStatus::from_str("Succeeded"), ExecutionStatus::Succeeded);
+        assert_eq!(ExecutionStatus::from_str("Failed"), ExecutionStatus::Failed);
+        assert_eq!(ExecutionStatus::from_str("Stopped"), ExecutionStatus::Stopped);
+        assert_eq!(ExecutionStatus::from_str("Stopping"), ExecutionStatus::Stopping);
+    }
+
+    #[test]
+    fn from_str_unknown_fallback() {
+        assert_eq!(
+            ExecutionStatus::from_str("Banana"),
+            ExecutionStatus::Unknown("Banana".to_string())
+        );
+    }
+
+    #[test]
+    fn as_str_roundtrip() {
+        for variant in ["Executing", "Succeeded", "Failed", "Stopped", "Stopping"] {
+            assert_eq!(ExecutionStatus::from_str(variant).as_str(), variant);
+        }
+    }
+
+    #[test]
+    fn unknown_as_str_preserves_value() {
+        let status = ExecutionStatus::from_str("CustomStatus");
+        assert_eq!(status.as_str(), "CustomStatus");
+    }
+}

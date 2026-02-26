@@ -121,3 +121,104 @@ impl StepInfo {
         String::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_step(name: &str) -> StepInfo {
+        StepInfo {
+            name: name.to_string(),
+            step_type: StepType::Training,
+            status: StepStatus::Succeeded,
+            start_time: None,
+            end_time: None,
+            failure_reason: None,
+            job_details: None,
+        }
+    }
+
+    // --- StepStatus ---
+
+    #[test]
+    fn status_from_str_known_variants() {
+        assert_eq!(StepStatus::from_str("Executing"), StepStatus::Executing);
+        assert_eq!(StepStatus::from_str("Succeeded"), StepStatus::Succeeded);
+        assert_eq!(StepStatus::from_str("Failed"), StepStatus::Failed);
+        assert_eq!(StepStatus::from_str("Stopped"), StepStatus::Stopped);
+    }
+
+    #[test]
+    fn status_from_str_unknown() {
+        assert_eq!(
+            StepStatus::from_str("Banana"),
+            StepStatus::Unknown("Banana".to_string())
+        );
+    }
+
+    #[test]
+    fn status_as_str_roundtrip() {
+        for s in ["Executing", "Succeeded", "Failed", "Stopped"] {
+            assert_eq!(StepStatus::from_str(s).as_str(), s);
+        }
+    }
+
+    #[test]
+    fn status_not_started_as_str() {
+        assert_eq!(StepStatus::NotStarted.as_str(), "Not Started");
+    }
+
+    // --- StepInfo::detail_str ---
+
+    #[test]
+    fn detail_str_empty_when_no_details() {
+        let step = make_step("s");
+        assert_eq!(step.detail_str(), "");
+    }
+
+    #[test]
+    fn detail_str_secondary_status_takes_priority() {
+        let mut step = make_step("s");
+        step.failure_reason = Some("bad stuff".to_string());
+        step.job_details = Some(JobDetails {
+            job_type: JobType::Training,
+            job_name: "job".to_string(),
+            secondary_status: Some("Downloading".to_string()),
+            instance_type: None,
+        });
+        assert_eq!(step.detail_str(), "Downloading");
+    }
+
+    #[test]
+    fn detail_str_failure_reason_truncated_at_40() {
+        let mut step = make_step("s");
+        step.failure_reason = Some("a".repeat(50));
+        let detail = step.detail_str();
+        assert!(detail.ends_with("..."));
+        // 40 chars + "..." = 43
+        assert_eq!(detail.len(), 43);
+    }
+
+    #[test]
+    fn detail_str_short_failure_reason_not_truncated() {
+        let mut step = make_step("s");
+        step.failure_reason = Some("short reason".to_string());
+        assert_eq!(step.detail_str(), "short reason");
+    }
+
+    // --- StepInfo::start_time_str ---
+
+    #[test]
+    fn start_time_str_none() {
+        let step = make_step("s");
+        assert_eq!(step.start_time_str(), "--");
+    }
+
+    #[test]
+    fn start_time_str_formats_hms() {
+        use chrono::TimeZone;
+        let mut step = make_step("s");
+        step.start_time = Some(Utc.with_ymd_and_hms(2024, 1, 15, 14, 30, 45).unwrap());
+        assert_eq!(step.start_time_str(), "14:30:45");
+    }
+}
