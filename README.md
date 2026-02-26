@@ -31,13 +31,19 @@ furnace --pipeline my-pipeline --region us-east-1
 
 ## Keybindings
 
+### Global
+
+| Key       | Action              |
+|-----------|---------------------|
+| `q`       | Quit                |
+| `Esc`     | Back one level      |
+
 ### Pipeline Selection
 
 | Key       | Action              |
 |-----------|---------------------|
 | `↑` `↓`  | Navigate pipelines  |
 | `Enter`   | View executions     |
-| `q` `Esc` | Quit                |
 
 ### Execution Selection
 
@@ -45,8 +51,6 @@ furnace --pipeline my-pipeline --region us-east-1
 |-----------|---------------------|
 | `↑` `↓`  | Navigate executions |
 | `Enter`   | Monitor execution   |
-| `p`       | Back to pipelines   |
-| `q` `Esc` | Quit                |
 
 ### Monitoring
 
@@ -57,8 +61,6 @@ furnace --pipeline my-pipeline --region us-east-1
 | `g`       | Jump to top of logs           |
 | `G`       | Jump to end, re-enable follow |
 | `r`       | Force refresh                 |
-| `e`       | Back to execution list        |
-| `q` `Esc` | Quit                          |
 
 ## Requirements
 

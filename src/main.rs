@@ -156,9 +156,14 @@ async fn run_app(
                     break;
                 }
 
+                // q always quits
+                if key.code == KeyCode::Char('q') {
+                    break;
+                }
+
                 match app.mode {
                     AppMode::SelectPipeline => match key.code {
-                        KeyCode::Char('q') | KeyCode::Esc => break,
+                        KeyCode::Esc => break,
                         KeyCode::Up => app.pipeline_cursor_up(),
                         KeyCode::Down => app.pipeline_cursor_down(),
                         KeyCode::Enter => {
@@ -191,16 +196,16 @@ async fn run_app(
                         _ => {}
                     },
                     AppMode::SelectExecution => match key.code {
-                        KeyCode::Char('q') | KeyCode::Esc => break,
-                        KeyCode::Up => app.execution_cursor_up(),
-                        KeyCode::Down => app.execution_cursor_down(),
-                        KeyCode::Char('p') => {
-                            // Go back to pipeline list (only if we didn't skip it via --pipeline)
+                        KeyCode::Esc => {
                             if cli.pipeline.is_none() {
                                 app.mode = AppMode::SelectPipeline;
                                 app.error_message = None;
+                            } else {
+                                break;
                             }
                         }
+                        KeyCode::Up => app.execution_cursor_up(),
+                        KeyCode::Down => app.execution_cursor_down(),
                         KeyCode::Enter => {
                             if let Some(arn) = app.selected_execution_arn() {
                                 let arn = arn.to_string();
@@ -211,7 +216,22 @@ async fn run_app(
                         _ => {}
                     },
                     AppMode::Monitoring => match key.code {
-                        KeyCode::Char('q') | KeyCode::Esc => break,
+                        KeyCode::Esc => {
+                            app.mode = AppMode::SelectExecution;
+                            app.execution_cursor = 0;
+                            // Refresh execution list
+                            if let Some(ref pipeline_name) = app.selected_pipeline_name {
+                                if let Ok(execs) = aws::sagemaker::list_executions(
+                                    &clients.sagemaker,
+                                    pipeline_name,
+                                    20,
+                                )
+                                .await
+                                {
+                                    app.executions = execs;
+                                }
+                            }
+                        }
                         KeyCode::Up => {
                             app.select_step_up();
                             let _ = step_tx.send(app.selected_step_name().to_string());
@@ -236,22 +256,6 @@ async fn run_app(
                         }
                         KeyCode::Char('r') => {
                             let _ = force_tx.send(());
-                        }
-                        KeyCode::Char('e') => {
-                            app.mode = AppMode::SelectExecution;
-                            app.execution_cursor = 0;
-                            // Refresh execution list
-                            if let Some(ref pipeline_name) = app.selected_pipeline_name {
-                                if let Ok(execs) = aws::sagemaker::list_executions(
-                                    &clients.sagemaker,
-                                    pipeline_name,
-                                    20,
-                                )
-                                .await
-                                {
-                                    app.executions = execs;
-                                }
-                            }
                         }
                         _ => {}
                     },
