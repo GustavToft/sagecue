@@ -20,7 +20,7 @@ fn key_span(key: &str, desc: &str) -> Vec<Span<'static>> {
     ]
 }
 
-pub fn draw_monitor_bar(f: &mut Frame, area: Rect) {
+pub fn draw_monitor_bar(f: &mut Frame, area: Rect, notifications_enabled: bool) {
     let mut spans: Vec<Span> = Vec::new();
     spans.extend(key_span("Esc", "Back"));
     spans.extend(key_span("q", "Quit"));
@@ -28,6 +28,18 @@ pub fn draw_monitor_bar(f: &mut Frame, area: Rect) {
     spans.extend(key_span("j/k", "Scroll"));
     spans.extend(key_span("G/g", "End/Start"));
     spans.extend(key_span("r", "Refresh"));
+    spans.extend(key_span("n", "Notify"));
+    if notifications_enabled {
+        spans.push(Span::styled(
+            "[ON] ",
+            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+        ));
+    } else {
+        spans.push(Span::styled(
+            "[OFF] ",
+            Style::default().fg(Color::Rgb(80, 80, 80)),
+        ));
+    }
 
     let line = Line::from(spans);
     let bar = Paragraph::new(line).style(Style::default().bg(Color::DarkGray));

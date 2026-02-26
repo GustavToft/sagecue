@@ -11,6 +11,7 @@ pub enum Action {
     ForceRefresh,
     StepChanged { step_name: String },
     BackToExecutions { pipeline_name: String },
+    ToggleNotifications,
 }
 
 /// Pure key handler: mutates App state and returns an Action for the caller.
@@ -128,6 +129,7 @@ fn handle_monitoring(app: &mut App, key: KeyEvent) -> Action {
             Action::None
         }
         KeyCode::Char('r') => Action::ForceRefresh,
+        KeyCode::Char('n') => Action::ToggleNotifications,
         _ => Action::None,
     }
 }

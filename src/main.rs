@@ -3,6 +3,7 @@ mod aws;
 mod event;
 mod handler;
 mod model;
+mod notify;
 mod polling;
 mod ui;
 
@@ -40,6 +41,10 @@ struct Cli {
     /// Pipeline name (skip pipeline selection screen)
     #[arg(long)]
     pipeline: Option<String>,
+
+    /// Enable desktop notifications for step/pipeline completion
+    #[arg(long)]
+    notify: bool,
 }
 
 #[tokio::main]
@@ -74,6 +79,7 @@ async fn run_app(
     cli: &Cli,
 ) -> Result<()> {
     let mut app = App::new();
+    app.notifications_enabled = cli.notify;
     let mut events = EventHandler::new(Duration::from_millis(250));
 
     // Channels for polling task
@@ -171,6 +177,9 @@ async fn run_app(
                     }
                     Action::StepChanged { step_name } => {
                         let _ = step_tx.send(step_name);
+                    }
+                    Action::ToggleNotifications => {
+                        app.toggle_notifications();
                     }
                     Action::BackToExecutions { pipeline_name } => {
                         if !pipeline_name.is_empty() {

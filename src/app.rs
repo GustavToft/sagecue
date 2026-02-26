@@ -2,6 +2,7 @@ use crate::model::execution::{ExecutionSummary, PipelineExecution};
 use crate::model::logs::LogViewerState;
 use crate::model::pipeline::PipelineSummary;
 use crate::model::step::{StepInfo, StepStatus};
+use crate::notify;
 use crate::polling::PollResult;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,6 +27,7 @@ pub struct App {
     pub should_quit: bool,
     pub error_message: Option<String>,
     pub loading: bool,
+    pub notifications_enabled: bool,
 }
 
 impl App {
@@ -45,6 +47,7 @@ impl App {
             should_quit: false,
             error_message: None,
             loading: true,
+            notifications_enabled: false,
         }
     }
 
@@ -150,8 +153,28 @@ impl App {
         }
     }
 
+    pub fn toggle_notifications(&mut self) {
+        self.notifications_enabled = !self.notifications_enabled;
+    }
+
     /// Apply a poll result from the background polling task.
     pub fn apply_poll_result(&mut self, result: PollResult) {
+        if self.notifications_enabled {
+            let step_events = notify::detect_step_transitions(&self.steps, &result.steps);
+            for event in &step_events {
+                notify::send(event);
+            }
+
+            if let Some(ref old_exec) = self.execution {
+                let pipeline_name = self.selected_pipeline_name.as_deref().unwrap_or("pipeline");
+                if let Some(event) =
+                    notify::detect_execution_transition(old_exec, &result.execution, pipeline_name)
+                {
+                    notify::send(&event);
+                }
+            }
+        }
+
         self.execution = Some(result.execution);
         self.update_steps(result.steps);
         self.maybe_follow_executing_step();
