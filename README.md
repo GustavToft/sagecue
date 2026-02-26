@@ -73,34 +73,6 @@ furnace --pipeline my-pipeline --region us-east-1
   Standard credential sources (environment variables, `~/.aws/credentials`, IAM roles) also work.
 - Access to SageMaker and CloudWatch Logs APIs
 
-## Architecture
-
-```
-src/
-├── main.rs         # CLI args, event loop, terminal setup
-├── app.rs          # Application state and mode management
-├── event.rs        # Keyboard and tick event handler
-├── polling.rs      # Async background polling task
-├── aws/
-│   ├── client.rs   # AWS SDK client initialization
-│   ├── sagemaker.rs    # SageMaker API calls
-│   └── cloudwatch.rs   # CloudWatch Logs streaming
-├── model/
-│   ├── pipeline.rs     # Pipeline summary types
-│   ├── execution.rs    # Pipeline execution types
-│   ├── step.rs         # Step status types
-│   └── logs.rs         # Log stream state
-└── ui/
-    ├── header.rs       # Execution info header
-    ├── pipeline_list.rs    # Pipeline selector table
-    ├── execution_list.rs   # Execution selector table
-    ├── steps.rs        # Step status table
-    ├── logs.rs         # Scrollable log viewer
-    └── status_bar.rs   # Contextual keybinding help
-```
-
-Async event loop built on **tokio** with watch channels for command dispatch and mpsc for polling results. Terminal I/O handled by **crossterm**.
-
 ---
 
 ## Roadmap
@@ -149,6 +121,6 @@ Desktop alerts so you don't have to stare at the terminal.
 Make fully configurable and publishable.
 
 - [ ] Config file (TOML) — pipelines, region, MLFlow URL, notification prefs
-- [ ] Generic SageMaker pipeline support (auto-discover steps)
+- [x] Generic SageMaker pipeline support (auto-discover steps)
 - [ ] `cargo install furnace` via crates.io
 - [ ] CI/CD with GitHub Actions (build, test, release binaries)

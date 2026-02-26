@@ -39,7 +39,7 @@ cargo test                     # Run tests (none currently)
 - `model/` — Domain types with status enums parsed from AWS strings (`ExecutionStatus`, `StepStatus`)
 - `ui/` — Ratatui rendering components, one per screen region (header, tables, logs, status bar)
 
-**Hardcoded pipeline steps** in `app.rs` (`PIPELINE_STEPS` constant) define the expected step order for display.
+**Dynamic step discovery:** Steps are fetched from the SageMaker API and sorted by start time. `StepType` enum classifies steps (Training, Processing, Transform, Condition, RegisterModel, Lambda, Fail). Job-backed steps get log streaming and detail enrichment.
 
 **Log streaming** maintains per-step state with forward tokens for pagination, auto-discovers log streams from CloudWatch, and supports auto-scroll with manual override.
 
