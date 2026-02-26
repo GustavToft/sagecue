@@ -116,7 +116,7 @@ Desktop alerts so you don't have to stare at the terminal.
 - [ ] Configurable notification rules (notify on failure only, always, never)
 - [ ] macOS native notifications via `osascript` / `notify-send` on Linux
 
-### v0.6 — Standalone Release
+### v1.0 — Standalone Release
 
 Make fully configurable and publishable.
 
