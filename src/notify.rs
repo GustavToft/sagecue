@@ -169,7 +169,7 @@ pub fn send(event: &NotificationEvent) {
 
     std::thread::spawn(move || {
         let _ = notify_rust::Notification::new()
-            .appname("Furnace")
+            .appname("Sagecue")
             .summary(&summary)
             .body(&body)
             .show();

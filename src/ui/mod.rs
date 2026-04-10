@@ -47,7 +47,7 @@ fn split_error_banner(area: Rect, has_error: bool) -> (Rect, Rect) {
 fn draw_error_banner(f: &mut Frame, area: Rect, err: &PollError) {
     let text = match err {
         PollError::CredentialsExpired { .. } => {
-            " AWS credentials expired — re-authenticate and restart furnace ".to_string()
+            " AWS credentials expired — re-authenticate and restart sagecue ".to_string()
         }
         PollError::Other { .. } => {
             format!(" Poll error: {} ", err.message())

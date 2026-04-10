@@ -28,7 +28,7 @@ use model::execution::ExecutionStatus;
 const REGION: &str = "eu-west-1";
 
 #[derive(Parser)]
-#[command(name = "pipeline-monitor")]
+#[command(name = "sagecue")]
 #[command(about = "TUI monitor for SageMaker pipeline executions")]
 struct Cli {
     /// Skip execution selection, monitor the latest execution
@@ -51,12 +51,12 @@ struct Cli {
 #[tokio::main]
 async fn main() -> Result<()> {
     // Log to file since stdout is the TUI
-    let log_file = std::fs::File::create("/tmp/furnace.log").unwrap();
+    let log_file = std::fs::File::create("/tmp/sagecue.log").unwrap();
     tracing_subscriber::fmt()
         .with_writer(log_file)
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("pipeline_monitor=debug".parse().unwrap()),
+                .add_directive("sagecue=debug".parse().unwrap()),
         )
         .with_ansi(false)
         .init();

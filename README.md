@@ -1,8 +1,8 @@
-# furnace
+# sagecue
 
 Real-time TUI monitor for ML pipeline executions on AWS SageMaker.
 
-A furnace transforms raw material through intense heat — **furnace** watches your ML pipeline transform raw data into models through compute. Built in Rust with [ratatui](https://ratatui.rs).
+**sagecue** gives you a live cue on your SageMaker pipelines — steps, logs, metrics, and job details streaming straight to your terminal. Built in Rust with [ratatui](https://ratatui.rs).
 
 ## Features
 
@@ -20,13 +20,13 @@ A furnace transforms raw material through intense heat — **furnace** watches y
 cargo build --release
 
 # Monitor the latest execution
-furnace --latest
+sagecue --latest
 
 # Select from recent executions
-furnace
+sagecue
 
 # Custom pipeline and region
-furnace --pipeline my-pipeline --region us-east-1
+sagecue --pipeline my-pipeline --region us-east-1
 ```
 
 ## Keybindings
@@ -68,7 +68,7 @@ furnace --pipeline my-pipeline --region us-east-1
 - AWS credentials configured — we recommend [Granted](https://docs.commonfate.io/granted/getting-started) for assuming roles:
   ```bash
   assume <your-profile>
-  furnace
+  sagecue
   ```
   Standard credential sources (environment variables, `~/.aws/credentials`, IAM roles) also work.
 - Access to SageMaker and CloudWatch Logs APIs
@@ -81,9 +81,9 @@ furnace --pipeline my-pipeline --region us-east-1
 
 Non-TUI commands for scripting, CI, and quick access.
 
-- [ ] `furnace run` — start a pipeline execution from the shell (with optional parameter overrides)
-- [ ] `furnace status` — one-liner showing latest execution status (exit code reflects pass/fail)
-- [ ] `furnace status --watch` — poll until execution completes, with desktop notification on finish/failure
+- [ ] `sagecue run` — start a pipeline execution from the shell (with optional parameter overrides)
+- [ ] `sagecue status` — one-liner showing latest execution status (exit code reflects pass/fail)
+- [ ] `sagecue status --watch` — poll until execution completes, with desktop notification on finish/failure
 
 ### v0.3 — Training Metrics
 
@@ -126,5 +126,5 @@ Make fully configurable and publishable.
 
 - [ ] Config file (TOML) — pipelines, region, notification prefs
 - [x] Generic SageMaker pipeline support (auto-discover steps)
-- [ ] `cargo install furnace` via crates.io
+- [ ] `cargo install sagecue` via crates.io
 - [ ] CI/CD with GitHub Actions (build, test, release binaries)

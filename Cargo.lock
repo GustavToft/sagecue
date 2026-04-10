@@ -2004,28 +2004,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
 
 [[package]]
-name = "pipeline-monitor"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "aws-config",
- "aws-sdk-cloudwatchlogs",
- "aws-sdk-sagemaker",
- "aws-sdk-sagemakermetrics",
- "chrono",
- "clap",
- "crossterm",
- "notify-rust",
- "ratatui",
- "serde_json",
- "tokio",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
 name = "piper"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2299,6 +2277,28 @@ name = "ryu"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
+
+[[package]]
+name = "sagecue"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "aws-config",
+ "aws-sdk-cloudwatchlogs",
+ "aws-sdk-sagemaker",
+ "aws-sdk-sagemakermetrics",
+ "chrono",
+ "clap",
+ "crossterm",
+ "notify-rust",
+ "ratatui",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+ "uuid",
+]
 
 [[package]]
 name = "schannel"

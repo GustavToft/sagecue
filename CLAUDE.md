@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Furnace is a Rust TUI application for real-time monitoring of AWS SageMaker pipeline executions. It provides live step tracking, CloudWatch log streaming, and job detail enrichment in the terminal using ratatui.
+Sagecue is a Rust TUI application for real-time monitoring of AWS SageMaker pipeline executions. It provides live step tracking, CloudWatch log streaming, and job detail enrichment in the terminal using ratatui.
 
 ## Build & Run Commands
 
@@ -17,7 +17,7 @@ cargo run -- --pipeline NAME   # Skip pipeline selection
 cargo run -- --region REGION   # Override region (default: eu-west-1)
 cargo check                    # Type-check without building
 cargo clippy                   # Lint
-cargo test                     # Run tests (none currently)
+cargo test                     # Run unit tests
 ```
 
 ## Architecture
