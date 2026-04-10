@@ -6,7 +6,7 @@ use crate::aws::{cloudwatch, sagemaker};
 use crate::model::execution::{ExecutionSummary, PipelineExecution};
 use crate::model::logs::LogStreamState;
 use crate::model::metrics::StepMetrics;
-use crate::model::step::{JobType, StepInfo, StepStatus};
+use crate::model::step::{JobDetails, JobType, StepInfo, StepStatus};
 
 /// Configuration sent from the main loop to the poll task via a single watch channel.
 ///
@@ -105,6 +105,11 @@ pub fn spawn_poll_task(
         // Per-step log stream state, keyed by step name
         let mut log_states: std::collections::HashMap<String, LogStreamState> =
             std::collections::HashMap::new();
+        // Cache of enriched job details, keyed by job name. Lets us backfill
+        // instance type / count for completed steps (which we otherwise skip)
+        // without re-calling describe_* on every tick.
+        let mut job_detail_cache: std::collections::HashMap<String, JobDetails> =
+            std::collections::HashMap::new();
         let mut last_arn = String::new();
 
         loop {
@@ -154,6 +159,7 @@ pub fn spawn_poll_task(
             // Clear cached state when switching to a different execution
             if arn != last_arn {
                 log_states.clear();
+                job_detail_cache.clear();
                 last_arn = arn.clone();
             }
 
@@ -183,10 +189,36 @@ pub fn spawn_poll_task(
                 }
             };
 
-            // Enrich executing steps with job details
+            // Enrich job details:
+            //   - Executing steps: always refresh (for live secondary_status).
+            //   - Terminal steps: enrich once, then reuse from cache so we
+            //     don't hammer describe_* APIs on every tick.
+            // In both cases, update the cache after a successful enrichment
+            // and paste cached data into any step we skipped.
             for step in &mut steps {
-                if step.status == StepStatus::Executing && step.job_details.is_some() {
-                    let _ = sagemaker::enrich_job_details(&clients.sagemaker, step).await;
+                let Some(ref details) = step.job_details else {
+                    continue;
+                };
+                let job_name = details.job_name.clone();
+                let is_executing = step.status == StepStatus::Executing;
+                let cached = job_detail_cache.get(&job_name).cloned();
+                let needs_enrich = is_executing || cached.is_none();
+
+                if needs_enrich {
+                    if sagemaker::enrich_job_details(&clients.sagemaker, step)
+                        .await
+                        .is_ok()
+                    {
+                        if let Some(ref d) = step.job_details {
+                            job_detail_cache.insert(job_name, d.clone());
+                        }
+                    } else if let Some(cached_details) = cached {
+                        // Enrichment failed; fall back to cached data if we
+                        // have any rather than showing blanks.
+                        step.job_details = Some(cached_details);
+                    }
+                } else if let Some(cached_details) = cached {
+                    step.job_details = Some(cached_details);
                 }
             }
 

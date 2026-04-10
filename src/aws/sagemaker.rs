@@ -129,6 +129,7 @@ fn extract_step_type_and_job(
                 job_arn: Some(arn.to_string()),
                 secondary_status: None,
                 instance_type: None,
+                instance_count: None,
             }
         });
         return (StepType::Training, job_details);
@@ -143,6 +144,7 @@ fn extract_step_type_and_job(
                 job_arn: Some(arn.to_string()),
                 secondary_status: None,
                 instance_type: None,
+                instance_count: None,
             }
         });
         return (StepType::Processing, job_details);
@@ -157,6 +159,7 @@ fn extract_step_type_and_job(
                 job_arn: Some(arn.to_string()),
                 secondary_status: None,
                 instance_type: None,
+                instance_count: None,
             }
         });
         return (StepType::Transform, job_details);
@@ -374,6 +377,7 @@ pub async fn enrich_job_details(client: &Client, step: &mut StepInfo) -> Result<
                 d.instance_type = resp
                     .resource_config()
                     .and_then(|r| r.instance_type().map(|t| t.as_str().to_string()));
+                d.instance_count = resp.resource_config().and_then(|r| r.instance_count());
             }
         }
         JobType::Processing => {
@@ -392,6 +396,10 @@ pub async fn enrich_job_details(client: &Client, step: &mut StepInfo) -> Result<
                     .processing_resources()
                     .and_then(|r| r.cluster_config())
                     .and_then(|c| c.instance_type().map(|t| t.as_str().to_string()));
+                d.instance_count = resp
+                    .processing_resources()
+                    .and_then(|r| r.cluster_config())
+                    .and_then(|c| c.instance_count());
             }
         }
         JobType::Transform => {
@@ -409,6 +417,7 @@ pub async fn enrich_job_details(client: &Client, step: &mut StepInfo) -> Result<
                 d.instance_type = resp
                     .transform_resources()
                     .and_then(|r| r.instance_type().map(|t| t.as_str().to_string()));
+                d.instance_count = resp.transform_resources().and_then(|r| r.instance_count());
             }
         }
     }

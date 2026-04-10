@@ -81,6 +81,7 @@ pub struct JobDetails {
     pub job_arn: Option<String>,
     pub secondary_status: Option<String>,
     pub instance_type: Option<String>,
+    pub instance_count: Option<i32>,
 }
 
 #[derive(Debug, Clone)]
@@ -108,6 +109,22 @@ impl StepInfo {
         match self.start_time {
             Some(t) => fmt_local(t, "%H:%M:%S"),
             None => "--".to_string(),
+        }
+    }
+
+    /// Render the instance type + count for display, e.g. `"4x ml.p3.8xl"` or
+    /// just `"ml.m5.large"` for a single instance. Returns `"--"` for steps
+    /// without job details or without a known instance type.
+    pub fn instance_str(&self) -> String {
+        let Some(ref d) = self.job_details else {
+            return "--".to_string();
+        };
+        let Some(ref type_str) = d.instance_type else {
+            return "--".to_string();
+        };
+        match d.instance_count {
+            Some(n) if n > 1 => format!("{}x {}", n, type_str),
+            _ => type_str.clone(),
         }
     }
 
@@ -196,6 +213,7 @@ mod tests {
             job_arn: None,
             secondary_status: Some("Downloading".to_string()),
             instance_type: None,
+            instance_count: None,
         });
         assert_eq!(step.detail_str(), "Downloading");
     }
@@ -234,5 +252,55 @@ mod tests {
         // Format through Local the same way fmt_local does — tz-independent.
         let expected = dt.with_timezone(&Local).format("%H:%M:%S").to_string();
         assert_eq!(step.start_time_str(), expected);
+    }
+
+    // --- StepInfo::instance_str ---
+
+    fn make_job_details(
+        instance_type: Option<&str>,
+        instance_count: Option<i32>,
+    ) -> JobDetails {
+        JobDetails {
+            job_type: JobType::Training,
+            job_name: "job".to_string(),
+            job_arn: None,
+            secondary_status: None,
+            instance_type: instance_type.map(|s| s.to_string()),
+            instance_count,
+        }
+    }
+
+    #[test]
+    fn instance_str_no_job_details() {
+        let step = make_step("s");
+        assert_eq!(step.instance_str(), "--");
+    }
+
+    #[test]
+    fn instance_str_missing_type() {
+        let mut step = make_step("s");
+        step.job_details = Some(make_job_details(None, Some(4)));
+        assert_eq!(step.instance_str(), "--");
+    }
+
+    #[test]
+    fn instance_str_single_instance() {
+        let mut step = make_step("s");
+        step.job_details = Some(make_job_details(Some("ml.m5.large"), Some(1)));
+        assert_eq!(step.instance_str(), "ml.m5.large");
+    }
+
+    #[test]
+    fn instance_str_single_instance_no_count() {
+        let mut step = make_step("s");
+        step.job_details = Some(make_job_details(Some("ml.m5.large"), None));
+        assert_eq!(step.instance_str(), "ml.m5.large");
+    }
+
+    #[test]
+    fn instance_str_multi_instance() {
+        let mut step = make_step("s");
+        step.job_details = Some(make_job_details(Some("ml.p3.8xl"), Some(4)));
+        assert_eq!(step.instance_str(), "4x ml.p3.8xl");
     }
 }

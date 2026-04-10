@@ -29,7 +29,9 @@ const REGION: &str = "eu-west-1";
 
 #[derive(Parser)]
 #[command(name = "sagecue")]
-#[command(about = "TUI monitor for SageMaker pipeline executions")]
+#[command(
+    about = "The pipeline monitor (Sagecue) is a terminal UI for monitoring AWS SageMaker pipeline executions — lets you browse pipelines, select executions, and watch step progress with live log tailing. Built in Rust with Ratatui."
+)]
 struct Cli {
     /// Skip execution selection, monitor the latest execution
     #[arg(long)]

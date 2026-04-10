@@ -2,6 +2,7 @@
 name = "sagecue"
 version = "0.1.0"
 edition = "2021"
+description = "The pipeline monitor (Sagecue) is a terminal UI for monitoring AWS SageMaker pipeline executions — lets you browse pipelines, select executions, and watch step progress with live log tailing. Built in Rust with Ratatui."
 
 [dependencies]
 ratatui = "0.29"
