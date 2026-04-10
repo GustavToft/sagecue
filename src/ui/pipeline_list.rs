@@ -4,6 +4,7 @@ use ratatui::widgets::{Block, Borders, Cell, Row, Table};
 use ratatui::Frame;
 
 use crate::app::App;
+use crate::model::format::fmt_local;
 
 pub fn draw(f: &mut Frame, app: &App, area: Rect) {
     if app.loading && app.pipelines.is_empty() {
@@ -61,7 +62,7 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
                 .unwrap_or("--");
             let last_run = pipeline
                 .last_execution_time
-                .map(|t| t.format("%Y-%m-%d %H:%M:%S").to_string())
+                .map(|t| fmt_local(t, "%Y-%m-%d %H:%M:%S"))
                 .unwrap_or_else(|| "--".to_string());
 
             let style = if is_selected {

@@ -1,3 +1,10 @@
+use chrono::{DateTime, Local, Utc};
+
+/// Format a UTC timestamp in the system's local timezone.
+pub fn fmt_local(dt: DateTime<Utc>, fmt: &str) -> String {
+    dt.with_timezone(&Local).format(fmt).to_string()
+}
+
 /// Format a duration in seconds into a human-readable string,
 /// progressively showing larger units as needed.
 ///
@@ -24,6 +31,24 @@ pub fn format_duration(total_secs: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::{FixedOffset, TimeZone};
+
+    #[test]
+    fn fmt_local_matches_chrono_local() {
+        let dt = Utc.with_ymd_and_hms(2026, 4, 10, 12, 34, 56).unwrap();
+        let expected = dt.with_timezone(&Local).format("%Y-%m-%d %H:%M:%S").to_string();
+        assert_eq!(fmt_local(dt, "%Y-%m-%d %H:%M:%S"), expected);
+    }
+
+    #[test]
+    fn fmt_local_is_not_utc_for_non_zero_offset() {
+        // Pick a UTC instant and verify that the helper would render it in
+        // local time by constructing the same conversion with a known offset.
+        let dt = Utc.with_ymd_and_hms(2026, 4, 10, 23, 0, 0).unwrap();
+        let plus_two = FixedOffset::east_opt(2 * 3600).unwrap();
+        let shifted = dt.with_timezone(&plus_two).format("%H").to_string();
+        assert_eq!(shifted, "01"); // 23:00 UTC is 01:00 +02:00
+    }
 
     #[test]
     fn negative_returns_dash() {

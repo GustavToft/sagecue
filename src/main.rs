@@ -137,6 +137,13 @@ async fn run_app(
                         c.execution_arn = arn;
                         c.selected_step = step_name;
                         c.metrics_tab_active = false;
+                        c.list_pipeline_name = String::new();
+                    });
+                } else {
+                    // Stay on SelectExecution: poll the list in the background.
+                    config_tx.send_modify(|c| {
+                        c.execution_arn = String::new();
+                        c.list_pipeline_name = pipeline_name.clone();
                     });
                 }
             }
@@ -204,6 +211,12 @@ async fn run_app(
                                 app.loading = false;
                             }
                         }
+                        // Turn on background polling for this pipeline's
+                        // execution list while the user is on the screen.
+                        config_tx.send_modify(|c| {
+                            c.execution_arn = String::new();
+                            c.list_pipeline_name = pipeline_name.clone();
+                        });
                     }
                     Action::StartMonitoring { arn, step_name } => {
                         // Abort any existing background watcher for this ARN
@@ -221,6 +234,7 @@ async fn run_app(
                             c.execution_arn = arn;
                             c.selected_step = step_name;
                             c.metrics_tab_active = false;
+                            c.list_pipeline_name = String::new();
                         });
                         let _ = force_tx.send(());
                     }
@@ -270,6 +284,7 @@ async fn run_app(
                                         c.execution_arn = new_arn;
                                         c.selected_step = step_name;
                                         c.metrics_tab_active = false;
+                                        c.list_pipeline_name = String::new();
                                     });
                                     let _ = force_tx.send(());
                                 }
@@ -286,6 +301,15 @@ async fn run_app(
                     }
                     Action::ToggleNotifications => {
                         app.toggle_notifications();
+                    }
+                    Action::BackToPipelines => {
+                        // Stop polling the execution list and clear any
+                        // stale poll error banner.
+                        config_tx.send_modify(|c| {
+                            c.execution_arn = String::new();
+                            c.list_pipeline_name = String::new();
+                        });
+                        app.last_poll_error = None;
                     }
                     Action::BackToExecutions { pipeline_name } => {
                         // Spawn background watcher if notifications are enabled
@@ -317,6 +341,10 @@ async fn run_app(
                             {
                                 app.executions = execs;
                             }
+                            config_tx.send_modify(|c| {
+                                c.execution_arn = String::new();
+                                c.list_pipeline_name = pipeline_name.clone();
+                            });
                         }
                     }
                 }

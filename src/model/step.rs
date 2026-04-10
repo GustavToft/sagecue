@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 
-use super::format::format_duration;
+use super::format::{fmt_local, format_duration};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StepStatus {
@@ -106,7 +106,7 @@ impl StepInfo {
 
     pub fn start_time_str(&self) -> String {
         match self.start_time {
-            Some(t) => t.format("%H:%M:%S").to_string(),
+            Some(t) => fmt_local(t, "%H:%M:%S"),
             None => "--".to_string(),
         }
     }
@@ -226,10 +226,13 @@ mod tests {
     }
 
     #[test]
-    fn start_time_str_formats_hms() {
-        use chrono::TimeZone;
+    fn start_time_str_formats_hms_in_local_tz() {
+        use chrono::{Local, TimeZone};
         let mut step = make_step("s");
-        step.start_time = Some(Utc.with_ymd_and_hms(2024, 1, 15, 14, 30, 45).unwrap());
-        assert_eq!(step.start_time_str(), "14:30:45");
+        let dt = Utc.with_ymd_and_hms(2024, 1, 15, 14, 30, 45).unwrap();
+        step.start_time = Some(dt);
+        // Format through Local the same way fmt_local does — tz-independent.
+        let expected = dt.with_timezone(&Local).format("%H:%M:%S").to_string();
+        assert_eq!(step.start_time_str(), expected);
     }
 }

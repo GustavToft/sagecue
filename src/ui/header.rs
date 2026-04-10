@@ -5,9 +5,9 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
-use crate::app::App;
+use crate::app::{stale_level, App, StaleLevel};
 use crate::model::execution::ExecutionStatus;
-use crate::model::format::format_duration;
+use crate::model::format::{fmt_local, format_duration};
 
 fn status_color(status: &ExecutionStatus) -> Color {
     match status {
@@ -44,13 +44,23 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
 
     let created_str = exec
         .created
-        .map(|t| t.format("%H:%M:%S").to_string())
+        .map(|t| fmt_local(t, "%H:%M:%S"))
         .unwrap_or_else(|| "--".to_string());
 
-    let updated_ago = exec.last_modified.map(|t| {
-        let ago = format_duration((Utc::now() - t).num_seconds());
-        format!("{} ago", ago)
-    }).unwrap_or_else(|| "--".to_string());
+    let now = Utc::now();
+    // "Updated" means "pipeline last_modified" — real activity on the
+    // execution, not our poll cadence.
+    let updated_ago = exec
+        .last_modified
+        .map(|t| format!("{} ago", format_duration((now - t).num_seconds())))
+        .unwrap_or_else(|| "--".to_string());
+
+    // Separate marker for poll health — if the poller has stalled (e.g.
+    // silent credential expiration or network partition), show "(stale)".
+    let stale_marker = match stale_level(app.last_successful_poll, now) {
+        StaleLevel::Fresh => None,
+        StaleLevel::Stale => Some(" (stale)"),
+    };
 
     let lines = vec![
         Line::from(vec![
@@ -64,13 +74,22 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
             Span::styled("Status: ", Style::default().fg(Color::Cyan)),
             Span::styled(exec.status.as_str(), status_style),
         ]),
-        Line::from(vec![
-            Span::styled("Created: ", Style::default().fg(Color::Cyan)),
-            Span::raw(created_str),
-            Span::raw("   "),
-            Span::styled("Updated: ", Style::default().fg(Color::Cyan)),
-            Span::raw(updated_ago),
-        ]),
+        Line::from({
+            let mut spans = vec![
+                Span::styled("Created: ", Style::default().fg(Color::Cyan)),
+                Span::raw(created_str),
+                Span::raw("   "),
+                Span::styled("Updated: ", Style::default().fg(Color::Cyan)),
+                Span::raw(updated_ago),
+            ];
+            if let Some(marker) = stale_marker {
+                spans.push(Span::styled(
+                    marker,
+                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                ));
+            }
+            spans
+        }),
     ];
 
     let block = Block::default()

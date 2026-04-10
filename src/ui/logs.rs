@@ -6,6 +6,7 @@ use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::app::App;
+use crate::model::format::fmt_local;
 
 pub fn draw(f: &mut Frame, app: &App, area: Rect) {
     let step_name = app.selected_step_name().unwrap_or_default();
@@ -65,7 +66,7 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
         .iter()
         .map(|entry| {
             let ts = DateTime::from_timestamp_millis(entry.timestamp)
-                .map(|dt| dt.format("%H:%M:%S").to_string())
+                .map(|dt| fmt_local(dt, "%H:%M:%S"))
                 .unwrap_or_default();
 
             Line::from(vec![

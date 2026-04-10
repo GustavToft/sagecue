@@ -10,6 +10,7 @@ pub enum Action {
     StartMonitoring { arn: String, step_name: String },
     StepChanged { step_name: String },
     BackToExecutions { pipeline_name: String },
+    BackToPipelines,
     ToggleNotifications,
     StopPipeline,
     RestartPipeline,
@@ -68,7 +69,7 @@ fn handle_select_execution(app: &mut App, key: KeyEvent, has_pipeline_flag: bool
         KeyCode::Esc => {
             if !has_pipeline_flag {
                 app.enter_select_pipeline();
-                Action::None
+                Action::BackToPipelines
             } else {
                 Action::Quit
             }
@@ -290,7 +291,7 @@ mod tests {
         let mut app = App::new();
         app.mode = AppMode::SelectExecution;
         let action = handle_key(&mut app, key(KeyCode::Esc), false);
-        assert!(matches!(action, Action::None));
+        assert!(matches!(action, Action::BackToPipelines));
         assert_eq!(app.mode, AppMode::SelectPipeline);
     }
 

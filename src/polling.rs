@@ -3,28 +3,94 @@ use tokio::sync::{mpsc, watch};
 
 use crate::aws::client::AwsClients;
 use crate::aws::{cloudwatch, sagemaker};
-use crate::model::execution::PipelineExecution;
+use crate::model::execution::{ExecutionSummary, PipelineExecution};
 use crate::model::logs::LogStreamState;
 use crate::model::metrics::StepMetrics;
 use crate::model::step::{JobType, StepInfo, StepStatus};
 
 /// Configuration sent from the main loop to the poll task via a single watch channel.
+///
+/// The poller dispatches based on which field is populated:
+/// - `execution_arn` non-empty → poll monitoring details for that execution
+/// - else `list_pipeline_name` non-empty → poll the execution list for that pipeline
+/// - else idle
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PollConfig {
     pub execution_arn: String,
     pub selected_step: String,
     pub metrics_tab_active: bool,
+    pub list_pipeline_name: String,
 }
 
-/// Result sent from poll task back to the main loop
+/// Update from a successful monitoring poll.
 #[derive(Debug)]
-pub struct PollResult {
+pub struct MonitoringUpdate {
     pub execution: PipelineExecution,
     pub steps: Vec<StepInfo>,
     pub log_step_name: Option<String>,
     pub log_stream_state: Option<LogStreamState>,
     pub metrics_step_name: Option<String>,
     pub metrics: Option<StepMetrics>,
+}
+
+/// Classification of a poll error. Credential/expiration errors are surfaced
+/// with a distinct variant so the UI can show a clearer message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PollError {
+    CredentialsExpired { message: String },
+    Other { message: String },
+}
+
+impl PollError {
+    pub fn message(&self) -> &str {
+        match self {
+            PollError::CredentialsExpired { message } => message,
+            PollError::Other { message } => message,
+        }
+    }
+}
+
+/// Result sent from the poll task back to the main loop.
+///
+/// `Monitoring` is boxed because it's much larger than the other variants
+/// and the enum is passed through an mpsc channel.
+#[derive(Debug)]
+pub enum PollResult {
+    Monitoring(Box<MonitoringUpdate>),
+    ExecutionList {
+        pipeline_name: String,
+        executions: Vec<ExecutionSummary>,
+    },
+    Error(PollError),
+}
+
+/// AWS SDK error-code / message fragments that indicate expired or invalid credentials.
+const CREDENTIAL_MARKERS: &[&str] = &[
+    "ExpiredToken",
+    "ExpiredTokenException",
+    "UnrecognizedClientException",
+    "InvalidClientTokenId",
+    "CredentialsProviderError",
+    "credentials",
+    "token has expired",
+];
+
+/// Walk an error chain and classify it into a `PollError`.
+pub fn classify(err: &anyhow::Error) -> PollError {
+    let mut full = String::new();
+    for (i, cause) in err.chain().enumerate() {
+        if i > 0 {
+            full.push_str(": ");
+        }
+        full.push_str(&cause.to_string());
+    }
+    let lower = full.to_lowercase();
+    for marker in CREDENTIAL_MARKERS {
+        if lower.contains(&marker.to_lowercase()) {
+            return PollError::CredentialsExpired { message: full };
+        }
+    }
+    PollError::Other { message: full }
 }
 
 /// Spawn the background polling task.
@@ -53,7 +119,35 @@ pub fn spawn_poll_task(
 
             let config = config_rx.borrow().clone();
             let arn = config.execution_arn;
+
             if arn.is_empty() {
+                // No monitoring target — fall back to polling the execution list
+                // if the SelectExecution screen has set a pipeline name.
+                if !config.list_pipeline_name.is_empty() {
+                    let pipeline_name = config.list_pipeline_name.clone();
+                    match sagemaker::list_executions(
+                        &clients.sagemaker,
+                        &pipeline_name,
+                        20,
+                    )
+                    .await
+                    {
+                        Ok(executions) => {
+                            if result_tx
+                                .send(PollResult::ExecutionList {
+                                    pipeline_name,
+                                    executions,
+                                })
+                                .is_err()
+                            {
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            let _ = result_tx.send(PollResult::Error(classify(&e)));
+                        }
+                    }
+                }
                 continue;
             }
 
@@ -75,12 +169,18 @@ pub fn spawn_poll_task(
             // Poll SageMaker
             let execution = match sagemaker::describe_execution(&clients.sagemaker, &arn).await {
                 Ok(e) => e,
-                Err(_) => continue,
+                Err(e) => {
+                    let _ = result_tx.send(PollResult::Error(classify(&e)));
+                    continue;
+                }
             };
 
             let mut steps = match sagemaker::list_steps(&clients.sagemaker, &arn).await {
                 Ok(s) => s,
-                Err(_) => continue,
+                Err(e) => {
+                    let _ = result_tx.send(PollResult::Error(classify(&e)));
+                    continue;
+                }
             };
 
             // Enrich executing steps with job details
@@ -173,7 +273,7 @@ pub fn spawn_poll_task(
                 }
             }
 
-            let result = PollResult {
+            let update = MonitoringUpdate {
                 execution,
                 steps,
                 log_step_name,
@@ -182,9 +282,73 @@ pub fn spawn_poll_task(
                 metrics: metrics_out,
             };
 
-            if result_tx.send(result).is_err() {
+            if result_tx.send(PollResult::Monitoring(Box::new(update))).is_err() {
                 break;
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anyhow::{anyhow, Context};
+
+    #[test]
+    fn classify_expired_token() {
+        let err = anyhow!("ExpiredToken: The security token included in the request is expired");
+        assert!(matches!(classify(&err), PollError::CredentialsExpired { .. }));
+    }
+
+    #[test]
+    fn classify_expired_token_exception() {
+        let err = anyhow!("ExpiredTokenException: token expired");
+        assert!(matches!(classify(&err), PollError::CredentialsExpired { .. }));
+    }
+
+    #[test]
+    fn classify_unrecognized_client() {
+        let err = anyhow!("UnrecognizedClientException: The security token included in the request is invalid");
+        assert!(matches!(classify(&err), PollError::CredentialsExpired { .. }));
+    }
+
+    #[test]
+    fn classify_invalid_client_token_id() {
+        let err = anyhow!("InvalidClientTokenId: bad token");
+        assert!(matches!(classify(&err), PollError::CredentialsExpired { .. }));
+    }
+
+    #[test]
+    fn classify_credentials_provider_error() {
+        let err = anyhow!("CredentialsProviderError: no provider");
+        assert!(matches!(classify(&err), PollError::CredentialsExpired { .. }));
+    }
+
+    #[test]
+    fn classify_expired_marker_deep_in_chain() {
+        // Wrap a root cause so it only appears via Error::chain, not Display.
+        let root: anyhow::Error = anyhow!("ExpiredTokenException: expired");
+        let wrapped = Err::<(), _>(root)
+            .context("Failed to describe pipeline execution")
+            .unwrap_err();
+        assert!(matches!(classify(&wrapped), PollError::CredentialsExpired { .. }));
+    }
+
+    #[test]
+    fn classify_generic_error_is_other() {
+        let err = anyhow!("boom: something went wrong");
+        match classify(&err) {
+            PollError::Other { message } => {
+                assert!(message.contains("boom"));
+            }
+            other => panic!("expected Other, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn classify_preserves_full_message() {
+        let err = anyhow!("network unreachable");
+        let e = classify(&err);
+        assert_eq!(e.message(), "network unreachable");
+    }
 }

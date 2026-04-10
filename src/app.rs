@@ -1,10 +1,30 @@
+use chrono::{DateTime, Utc};
+
 use crate::model::execution::{ExecutionSummary, PipelineExecution};
 use crate::model::logs::LogViewerState;
 use crate::model::metrics::MetricsState;
 use crate::model::pipeline::PipelineSummary;
 use crate::model::step::{StepInfo, StepStatus};
 use crate::notify;
-use crate::polling::PollResult;
+use crate::polling::{MonitoringUpdate, PollError, PollResult};
+
+/// Window after the last successful poll before we consider the view stale.
+pub const STALE_THRESHOLD_SECS: i64 = 15;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StaleLevel {
+    Fresh,
+    Stale,
+}
+
+/// Decide whether the data in the UI is still fresh based on the last
+/// successful poll time. `None` (no poll ever succeeded) is treated as stale.
+pub fn stale_level(last_successful_poll: Option<DateTime<Utc>>, now: DateTime<Utc>) -> StaleLevel {
+    match last_successful_poll {
+        Some(t) if (now - t).num_seconds() <= STALE_THRESHOLD_SECS => StaleLevel::Fresh,
+        _ => StaleLevel::Stale,
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppMode {
@@ -38,6 +58,11 @@ pub struct App {
     pub loading: bool,
     pub notifications_enabled: bool,
     pub background_watcher_count: usize,
+    /// Most recent poll error (credentials expired, transient failure, etc).
+    /// Cleared on the next successful poll result.
+    pub last_poll_error: Option<PollError>,
+    /// Timestamp of the most recent successful poll (any variant).
+    pub last_successful_poll: Option<DateTime<Utc>>,
 }
 
 impl App {
@@ -61,6 +86,8 @@ impl App {
             loading: true,
             notifications_enabled: false,
             background_watcher_count: 0,
+            last_poll_error: None,
+            last_successful_poll: None,
         }
     }
 
@@ -178,8 +205,20 @@ impl App {
         self.notifications_enabled = !self.notifications_enabled;
     }
 
-    /// Apply a poll result from the background polling task.
+    /// Dispatch a poll result from the background polling task.
     pub fn apply_poll_result(&mut self, result: PollResult) {
+        match result {
+            PollResult::Monitoring(update) => self.apply_monitoring_result(*update),
+            PollResult::ExecutionList {
+                pipeline_name,
+                executions,
+            } => self.apply_execution_list_result(&pipeline_name, executions),
+            PollResult::Error(err) => self.apply_poll_error(err),
+        }
+    }
+
+    /// Apply a monitoring update (steps + logs + metrics for a single execution).
+    pub fn apply_monitoring_result(&mut self, result: MonitoringUpdate) {
         if self.notifications_enabled {
             let step_events = notify::detect_step_transitions(&self.steps, &result.steps);
             for event in &step_events {
@@ -211,6 +250,41 @@ impl App {
         {
             self.metrics_state.per_step_cache.insert(step_name, step_metrics);
         }
+
+        self.mark_poll_success();
+    }
+
+    /// Apply a refreshed execution list (SelectExecution screen polling).
+    /// Only replaces the list if it belongs to the currently-selected pipeline.
+    pub fn apply_execution_list_result(
+        &mut self,
+        pipeline_name: &str,
+        executions: Vec<ExecutionSummary>,
+    ) {
+        if self.selected_pipeline_name.as_deref() != Some(pipeline_name) {
+            // User already navigated away — drop the stale update but still
+            // count it as a healthy poll cycle.
+            self.mark_poll_success();
+            return;
+        }
+
+        self.executions = executions;
+        if self.executions.is_empty() {
+            self.execution_cursor = 0;
+        } else if self.execution_cursor >= self.executions.len() {
+            self.execution_cursor = self.executions.len() - 1;
+        }
+
+        self.mark_poll_success();
+    }
+
+    fn apply_poll_error(&mut self, err: PollError) {
+        self.last_poll_error = Some(err);
+    }
+
+    fn mark_poll_success(&mut self) {
+        self.last_poll_error = None;
+        self.last_successful_poll = Some(Utc::now());
     }
 
     /// Transition into monitoring mode. Returns the initial step name for the poller.
@@ -275,8 +349,8 @@ mod tests {
         }
     }
 
-    fn make_poll_result(steps: Vec<StepInfo>) -> PollResult {
-        PollResult {
+    fn make_monitoring_update(steps: Vec<StepInfo>) -> MonitoringUpdate {
+        MonitoringUpdate {
             execution: PipelineExecution {
                 pipeline_arn: None,
                 display_name: None,
@@ -478,10 +552,10 @@ mod tests {
         assert!(app.error_message.is_none());
     }
 
-    // --- apply_poll_result ---
+    // --- apply_monitoring_result ---
 
     #[test]
-    fn apply_poll_result_updates_state() {
+    fn apply_monitoring_result_updates_state() {
         let mut app = App::new();
         app.mode = AppMode::Monitoring;
         app.auto_follow = true;
@@ -490,24 +564,201 @@ mod tests {
             make_step("a", StepStatus::Succeeded),
             make_step("b", StepStatus::Executing),
         ];
-        let result = make_poll_result(steps);
-        app.apply_poll_result(result);
+        let update = make_monitoring_update(steps);
+        app.apply_monitoring_result(update);
 
         assert!(app.execution.is_some());
         assert_eq!(app.steps.len(), 2);
         assert_eq!(app.selected_step, 1); // followed executing
+        assert!(app.last_successful_poll.is_some());
+        assert!(app.last_poll_error.is_none());
     }
 
     #[test]
-    fn apply_poll_result_inserts_log_cache() {
+    fn apply_monitoring_result_inserts_log_cache() {
         let mut app = App::new();
         app.mode = AppMode::Monitoring;
 
-        let mut result = make_poll_result(vec![make_step("s1", StepStatus::Executing)]);
-        result.log_step_name = Some("s1".to_string());
-        result.log_stream_state = Some(LogStreamState::new("/log/group".to_string()));
+        let mut update = make_monitoring_update(vec![make_step("s1", StepStatus::Executing)]);
+        update.log_step_name = Some("s1".to_string());
+        update.log_stream_state = Some(LogStreamState::new("/log/group".to_string()));
 
-        app.apply_poll_result(result);
+        app.apply_monitoring_result(update);
         assert!(app.log_viewer.per_step_cache.contains_key("s1"));
+    }
+
+    #[test]
+    fn apply_monitoring_result_leaves_executions_alone() {
+        let mut app = App::new();
+        app.executions = vec![make_execution("arn:1"), make_execution("arn:2")];
+        app.execution_cursor = 1;
+
+        let update = make_monitoring_update(vec![make_step("s1", StepStatus::Executing)]);
+        app.apply_monitoring_result(update);
+
+        assert_eq!(app.executions.len(), 2);
+        assert_eq!(app.execution_cursor, 1);
+    }
+
+    // --- apply_execution_list_result ---
+
+    #[test]
+    fn apply_execution_list_result_replaces_list() {
+        let mut app = App::new();
+        app.selected_pipeline_name = Some("p1".to_string());
+        app.executions = vec![make_execution("old")];
+        app.execution_cursor = 0;
+
+        app.apply_execution_list_result(
+            "p1",
+            vec![make_execution("new1"), make_execution("new2")],
+        );
+
+        assert_eq!(app.executions.len(), 2);
+        assert_eq!(app.executions[0].arn, "new1");
+        assert_eq!(app.execution_cursor, 0);
+        assert!(app.last_successful_poll.is_some());
+    }
+
+    #[test]
+    fn apply_execution_list_result_clamps_cursor_on_shrink() {
+        let mut app = App::new();
+        app.selected_pipeline_name = Some("p1".to_string());
+        app.executions = vec![
+            make_execution("a"),
+            make_execution("b"),
+            make_execution("c"),
+        ];
+        app.execution_cursor = 2;
+
+        app.apply_execution_list_result("p1", vec![make_execution("x")]);
+
+        assert_eq!(app.execution_cursor, 0);
+    }
+
+    #[test]
+    fn apply_execution_list_result_preserves_cursor_when_long_enough() {
+        let mut app = App::new();
+        app.selected_pipeline_name = Some("p1".to_string());
+        app.executions = vec![make_execution("a"), make_execution("b")];
+        app.execution_cursor = 1;
+
+        app.apply_execution_list_result(
+            "p1",
+            vec![
+                make_execution("a"),
+                make_execution("b"),
+                make_execution("c"),
+            ],
+        );
+
+        assert_eq!(app.execution_cursor, 1);
+    }
+
+    #[test]
+    fn apply_execution_list_result_handles_empty() {
+        let mut app = App::new();
+        app.selected_pipeline_name = Some("p1".to_string());
+        app.executions = vec![make_execution("a")];
+        app.execution_cursor = 0;
+
+        app.apply_execution_list_result("p1", vec![]);
+
+        assert!(app.executions.is_empty());
+        assert_eq!(app.execution_cursor, 0);
+    }
+
+    #[test]
+    fn apply_execution_list_result_ignores_mismatched_pipeline() {
+        let mut app = App::new();
+        app.selected_pipeline_name = Some("p1".to_string());
+        app.executions = vec![make_execution("kept")];
+
+        app.apply_execution_list_result("p2", vec![make_execution("other")]);
+
+        // List unchanged
+        assert_eq!(app.executions.len(), 1);
+        assert_eq!(app.executions[0].arn, "kept");
+        // But counted as healthy
+        assert!(app.last_successful_poll.is_some());
+    }
+
+    #[test]
+    fn apply_execution_list_result_does_not_touch_monitoring_state() {
+        let mut app = App::new();
+        app.selected_pipeline_name = Some("p1".to_string());
+        app.steps = vec![make_step("s1", StepStatus::Executing)];
+        app.mode = AppMode::Monitoring;
+
+        app.apply_execution_list_result("p1", vec![make_execution("a")]);
+
+        assert_eq!(app.steps.len(), 1);
+        assert_eq!(app.mode, AppMode::Monitoring);
+        assert!(app.execution.is_none());
+    }
+
+    // --- error state + stale timer ---
+
+    #[test]
+    fn poll_error_sets_last_poll_error() {
+        let mut app = App::new();
+        app.apply_poll_result(PollResult::Error(PollError::CredentialsExpired {
+            message: "ExpiredToken".to_string(),
+        }));
+        assert!(matches!(
+            app.last_poll_error,
+            Some(PollError::CredentialsExpired { .. })
+        ));
+    }
+
+    #[test]
+    fn monitoring_success_clears_error() {
+        let mut app = App::new();
+        app.last_poll_error = Some(PollError::Other {
+            message: "boom".to_string(),
+        });
+        let update = make_monitoring_update(vec![make_step("s1", StepStatus::Executing)]);
+        app.apply_monitoring_result(update);
+        assert!(app.last_poll_error.is_none());
+        assert!(app.last_successful_poll.is_some());
+    }
+
+    #[test]
+    fn execution_list_success_clears_error() {
+        let mut app = App::new();
+        app.selected_pipeline_name = Some("p1".to_string());
+        app.last_poll_error = Some(PollError::Other {
+            message: "boom".to_string(),
+        });
+        app.apply_execution_list_result("p1", vec![make_execution("a")]);
+        assert!(app.last_poll_error.is_none());
+        assert!(app.last_successful_poll.is_some());
+    }
+
+    #[test]
+    fn stale_level_none_is_stale() {
+        let now = Utc::now();
+        assert_eq!(stale_level(None, now), StaleLevel::Stale);
+    }
+
+    #[test]
+    fn stale_level_recent_is_fresh() {
+        let now = Utc::now();
+        let t = now - chrono::Duration::seconds(5);
+        assert_eq!(stale_level(Some(t), now), StaleLevel::Fresh);
+    }
+
+    #[test]
+    fn stale_level_at_threshold_is_fresh() {
+        let now = Utc::now();
+        let t = now - chrono::Duration::seconds(STALE_THRESHOLD_SECS);
+        assert_eq!(stale_level(Some(t), now), StaleLevel::Fresh);
+    }
+
+    #[test]
+    fn stale_level_past_threshold_is_stale() {
+        let now = Utc::now();
+        let t = now - chrono::Duration::seconds(STALE_THRESHOLD_SECS + 1);
+        assert_eq!(stale_level(Some(t), now), StaleLevel::Stale);
     }
 }

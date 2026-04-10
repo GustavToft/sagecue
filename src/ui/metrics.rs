@@ -6,6 +6,7 @@ use ratatui::widgets::{Axis, Block, Borders, Chart, Dataset, GraphType, Paragrap
 use ratatui::Frame;
 
 use crate::app::App;
+use crate::model::format::fmt_local;
 use crate::model::step::StepType;
 
 const PALETTE: [Color; 8] = [
@@ -288,7 +289,7 @@ fn draw_final_metrics(
         .final_metrics
         .iter()
         .map(|m| {
-            let ts = m.timestamp.format("%H:%M:%S").to_string();
+            let ts = fmt_local(m.timestamp, "%H:%M:%S");
             Line::from(vec![
                 Span::styled(
                     format!("  {:<30}", m.metric_name),

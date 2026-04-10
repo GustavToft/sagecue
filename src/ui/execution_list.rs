@@ -6,6 +6,7 @@ use ratatui::layout::Constraint;
 
 use crate::app::App;
 use crate::model::execution::ExecutionStatus;
+use crate::model::format::fmt_local;
 
 fn status_color(status: &ExecutionStatus) -> Color {
     match status {
@@ -75,7 +76,7 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
                 .unwrap_or("<unnamed>");
             let started = exec
                 .start_time
-                .map(|t| t.format("%Y-%m-%d %H:%M:%S").to_string())
+                .map(|t| fmt_local(t, "%Y-%m-%d %H:%M:%S"))
                 .unwrap_or_else(|| "--".to_string());
 
             let style = if is_selected {
