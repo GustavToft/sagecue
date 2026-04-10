@@ -19,10 +19,11 @@ use std::io;
 use std::time::Duration;
 use tokio::sync::{mpsc, watch};
 
-use app::{App, AppMode};
+use app::{App, AppMode, MonitorTab};
 use aws::client::AwsClients;
 use event::{AppEvent, EventHandler};
 use handler::Action;
+use model::execution::ExecutionStatus;
 
 const REGION: &str = "eu-west-1";
 
@@ -49,6 +50,17 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Log to file since stdout is the TUI
+    let log_file = std::fs::File::create("/tmp/furnace.log").unwrap();
+    tracing_subscriber::fmt()
+        .with_writer(log_file)
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::from_default_env()
+                .add_directive("pipeline_monitor=debug".parse().unwrap()),
+        )
+        .with_ansi(false)
+        .init();
+
     let cli = Cli::parse();
 
     // Init AWS clients
@@ -93,16 +105,14 @@ async fn run_app(
     let mut watchers: Vec<BackgroundWatcher> = Vec::new();
 
     // Channels for polling task
-    let (arn_tx, arn_rx) = watch::channel(String::new());
-    let (step_tx, step_rx) = watch::channel(String::new());
+    let (config_tx, config_rx) = watch::channel(polling::PollConfig::default());
     let (poll_result_tx, mut poll_result_rx) = mpsc::unbounded_channel();
     let (force_tx, force_rx) = mpsc::unbounded_channel();
 
     // Spawn background polling task
     let _poll_handle = polling::spawn_poll_task(
         clients.clone(),
-        arn_rx,
-        step_rx,
+        config_rx,
         poll_result_tx,
         force_rx,
     );
@@ -123,8 +133,11 @@ async fn run_app(
                     let arn = app.executions[0].arn.clone();
                     let step_name = app.enter_monitoring(&arn);
                     current_monitoring_arn = Some(arn.clone());
-                    arn_tx.send(arn)?;
-                    step_tx.send(step_name)?;
+                    config_tx.send_modify(|c| {
+                        c.execution_arn = arn;
+                        c.selected_step = step_name;
+                        c.metrics_tab_active = false;
+                    });
                 }
             }
             Err(e) => {
@@ -148,11 +161,25 @@ async fn run_app(
 
     // Main event loop
     loop {
-        terminal.draw(|f| ui::draw(f, &app))?;
+        terminal.draw(|f| ui::draw(f, &mut app))?;
 
         // Drain poll results (non-blocking)
         while let Ok(result) = poll_result_rx.try_recv() {
             app.apply_poll_result(result);
+        }
+
+        // Sync poller config with current app state
+        if app.mode == AppMode::Monitoring {
+            let step = app.selected_step_name().unwrap_or_default().to_string();
+            let want_metrics = app.active_tab == MonitorTab::Metrics;
+            let current = config_tx.borrow();
+            if current.selected_step != step || current.metrics_tab_active != want_metrics {
+                drop(current);
+                config_tx.send_modify(|c| {
+                    c.selected_step = step;
+                    c.metrics_tab_active = want_metrics;
+                });
+            }
         }
 
         match events.next().await? {
@@ -190,15 +217,72 @@ async fn run_app(
                         });
                         current_monitoring_arn = Some(arn.clone());
                         app.background_watcher_count = watchers.len();
-                        arn_tx.send(arn)?;
-                        step_tx.send(step_name)?;
+                        config_tx.send_modify(|c| {
+                            c.execution_arn = arn;
+                            c.selected_step = step_name;
+                            c.metrics_tab_active = false;
+                        });
                         let _ = force_tx.send(());
                     }
-                    Action::ForceRefresh => {
-                        let _ = force_tx.send(());
+                    Action::StopPipeline => {
+                        if let Some(ref arn) = current_monitoring_arn {
+                            let is_executing = app
+                                .execution
+                                .as_ref()
+                                .map(|e| e.status == ExecutionStatus::Executing)
+                                .unwrap_or(false);
+                            if is_executing {
+                                match aws::sagemaker::stop_pipeline_execution(
+                                    &clients.sagemaker,
+                                    arn,
+                                )
+                                .await
+                                {
+                                    Ok(()) => {
+                                        let _ = force_tx.send(());
+                                    }
+                                    Err(e) => {
+                                        app.error_message = Some(format!("{:#}", e));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Action::RestartPipeline => {
+                        let pipeline_name = app
+                            .execution
+                            .as_ref()
+                            .and_then(|e| e.pipeline_arn.as_deref())
+                            .and_then(|arn| arn.rsplit('/').next())
+                            .map(|s| s.to_string());
+
+                        if let Some(name) = pipeline_name {
+                            match aws::sagemaker::start_pipeline_execution(
+                                &clients.sagemaker,
+                                &name,
+                            )
+                            .await
+                            {
+                                Ok(new_arn) => {
+                                    let step_name = app.enter_monitoring(&new_arn);
+                                    current_monitoring_arn = Some(new_arn.clone());
+                                    config_tx.send_modify(|c| {
+                                        c.execution_arn = new_arn;
+                                        c.selected_step = step_name;
+                                        c.metrics_tab_active = false;
+                                    });
+                                    let _ = force_tx.send(());
+                                }
+                                Err(e) => {
+                                    app.error_message = Some(format!("{:#}", e));
+                                }
+                            }
+                        }
                     }
                     Action::StepChanged { step_name } => {
-                        let _ = step_tx.send(step_name);
+                        config_tx.send_modify(|c| {
+                            c.selected_step = step_name;
+                        });
                     }
                     Action::ToggleNotifications => {
                         app.toggle_notifications();

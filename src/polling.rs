@@ -5,7 +5,16 @@ use crate::aws::client::AwsClients;
 use crate::aws::{cloudwatch, sagemaker};
 use crate::model::execution::PipelineExecution;
 use crate::model::logs::LogStreamState;
-use crate::model::step::{StepInfo, StepStatus};
+use crate::model::metrics::StepMetrics;
+use crate::model::step::{JobType, StepInfo, StepStatus};
+
+/// Configuration sent from the main loop to the poll task via a single watch channel.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PollConfig {
+    pub execution_arn: String,
+    pub selected_step: String,
+    pub metrics_tab_active: bool,
+}
 
 /// Result sent from poll task back to the main loop
 #[derive(Debug)]
@@ -14,17 +23,14 @@ pub struct PollResult {
     pub steps: Vec<StepInfo>,
     pub log_step_name: Option<String>,
     pub log_stream_state: Option<LogStreamState>,
+    pub metrics_step_name: Option<String>,
+    pub metrics: Option<StepMetrics>,
 }
 
 /// Spawn the background polling task.
-///
-/// - `execution_arn_rx`: receives the current execution ARN to poll
-/// - `selected_step_rx`: receives which step to tail logs for
-/// - `result_tx`: sends poll results back to the main loop
 pub fn spawn_poll_task(
     clients: AwsClients,
-    execution_arn_rx: watch::Receiver<String>,
-    selected_step_rx: watch::Receiver<String>,
+    config_rx: watch::Receiver<PollConfig>,
     result_tx: mpsc::UnboundedSender<PollResult>,
     mut force_rx: mpsc::UnboundedReceiver<()>,
 ) -> tokio::task::JoinHandle<()> {
@@ -33,6 +39,7 @@ pub fn spawn_poll_task(
         // Per-step log stream state, keyed by step name
         let mut log_states: std::collections::HashMap<String, LogStreamState> =
             std::collections::HashMap::new();
+        let mut last_arn = String::new();
 
         loop {
             // Wait for next tick or force refresh
@@ -44,12 +51,26 @@ pub fn spawn_poll_task(
                 }
             }
 
-            let arn = execution_arn_rx.borrow().clone();
+            let config = config_rx.borrow().clone();
+            let arn = config.execution_arn;
             if arn.is_empty() {
                 continue;
             }
 
-            let selected_step = selected_step_rx.borrow().clone();
+            // Clear cached state when switching to a different execution
+            if arn != last_arn {
+                log_states.clear();
+                last_arn = arn.clone();
+            }
+
+            let selected_step = config.selected_step;
+            let metrics_tab_active = config.metrics_tab_active;
+
+            tracing::debug!(
+                step = %selected_step,
+                metrics_tab = metrics_tab_active,
+                "poll tick"
+            );
 
             // Poll SageMaker
             let execution = match sagemaker::describe_execution(&clients.sagemaker, &arn).await {
@@ -114,11 +135,51 @@ pub fn spawn_poll_task(
                 }
             }
 
+            // Fetch training metrics when Metrics tab is active
+            let mut metrics_step_name = None;
+            let mut metrics_out = None;
+
+            if metrics_tab_active && !selected_step.is_empty() {
+                if let Some(step) = steps.iter().find(|s| s.name == selected_step) {
+                    if let Some(ref job) = step.job_details {
+                        if matches!(job.job_type, JobType::Training) {
+                            let job_arn = job.job_arn.as_deref().unwrap_or_default();
+                            tracing::debug!(job_name = %job.job_name, "fetching training metrics");
+
+                            match sagemaker::fetch_all_training_metrics(
+                                &clients.sagemaker,
+                                &clients.sagemaker_metrics,
+                                &job.job_name,
+                                job_arn,
+                            )
+                            .await
+                            {
+                                Ok(step_metrics) => {
+                                    tracing::debug!(
+                                        final_count = step_metrics.final_metrics.len(),
+                                        experiment_series_count = step_metrics.experiment_series.len(),
+                                        "metrics fetched"
+                                    );
+
+                                    metrics_step_name = Some(selected_step.clone());
+                                    metrics_out = Some(step_metrics);
+                                }
+                                Err(e) => {
+                                    tracing::warn!(error = %e, "training metrics fetch failed");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             let result = PollResult {
                 execution,
                 steps,
                 log_step_name,
                 log_stream_state: log_stream_state_out,
+                metrics_step_name,
+                metrics: metrics_out,
             };
 
             if result_tx.send(result).is_err() {

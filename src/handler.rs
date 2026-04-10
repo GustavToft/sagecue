@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::app::{App, AppMode};
+use crate::app::{App, AppMode, MonitorTab};
 
 /// Describes a side-effect the main loop should perform after handling a key.
 pub enum Action {
@@ -8,10 +8,11 @@ pub enum Action {
     Quit,
     LoadExecutions { pipeline_name: String },
     StartMonitoring { arn: String, step_name: String },
-    ForceRefresh,
     StepChanged { step_name: String },
     BackToExecutions { pipeline_name: String },
     ToggleNotifications,
+    StopPipeline,
+    RestartPipeline,
 }
 
 /// Pure key handler: mutates App state and returns an Action for the caller.
@@ -110,28 +111,87 @@ fn handle_monitoring(app: &mut App, key: KeyEvent) -> Action {
             let name = app.selected_step_name().unwrap_or_default().to_string();
             Action::StepChanged { step_name: name }
         }
+        KeyCode::Tab => {
+            app.toggle_tab();
+            Action::None
+        }
         KeyCode::Char('j') => {
-            let name = app.selected_step_name().unwrap_or_default().to_string();
-            app.log_viewer.scroll_down(&name, 3);
+            match app.active_tab {
+                MonitorTab::Logs => {
+                    let name = app.selected_step_name().unwrap_or_default().to_string();
+                    app.log_viewer.scroll_down(&name, 3);
+                }
+                MonitorTab::Metrics => {
+                    let max = metrics_series_count(app);
+                    app.metrics_state.cursor_down(max);
+                }
+            }
             Action::None
         }
         KeyCode::Char('k') => {
-            app.log_viewer.scroll_up(3);
+            match app.active_tab {
+                MonitorTab::Logs => {
+                    app.log_viewer.scroll_up(3);
+                }
+                MonitorTab::Metrics => {
+                    app.metrics_state.cursor_up();
+                }
+            }
+            Action::None
+        }
+        KeyCode::Char(' ') => {
+            if app.active_tab == MonitorTab::Metrics {
+                let names = metrics_series_names(app);
+                if let Some(name) = names.get(app.metrics_state.metrics_cursor) {
+                    let name = name.clone();
+                    app.metrics_state.toggle_metric(&name);
+                }
+            }
+            Action::None
+        }
+        KeyCode::Char('a') => {
+            if app.active_tab == MonitorTab::Metrics {
+                let names = metrics_series_names(app);
+                app.metrics_state.toggle_all(&names);
+            }
             Action::None
         }
         KeyCode::Char('G') => {
-            let name = app.selected_step_name().unwrap_or_default().to_string();
-            app.log_viewer.jump_to_end(&name);
+            if app.active_tab == MonitorTab::Logs {
+                let name = app.selected_step_name().unwrap_or_default().to_string();
+                app.log_viewer.jump_to_end(&name);
+            }
             Action::None
         }
         KeyCode::Char('g') => {
-            app.log_viewer.jump_to_start();
+            if app.active_tab == MonitorTab::Logs {
+                app.log_viewer.jump_to_start();
+            }
             Action::None
         }
-        KeyCode::Char('r') => Action::ForceRefresh,
         KeyCode::Char('n') => Action::ToggleNotifications,
+        KeyCode::Char('S') => Action::StopPipeline,
+        KeyCode::Char('R') => Action::RestartPipeline,
         _ => Action::None,
     }
+}
+
+fn metrics_series_names(app: &App) -> Vec<String> {
+    let step_name = app.selected_step_name().unwrap_or_default();
+    app.metrics_state
+        .metrics_for_step(step_name)
+        .map(|m| {
+            m.experiment_series
+                .iter()
+                .filter(|s| !s.points.is_empty())
+                .map(|s| s.metric_name.clone())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn metrics_series_count(app: &App) -> usize {
+    metrics_series_names(app).len()
 }
 
 #[cfg(test)]
@@ -280,10 +340,17 @@ mod tests {
     }
 
     #[test]
-    fn monitoring_r_force_refresh() {
+    fn monitoring_s_stops_pipeline() {
         let mut app = App::new();
         app.mode = AppMode::Monitoring;
-        assert!(matches!(handle_key(&mut app, key(KeyCode::Char('r')), false), Action::ForceRefresh));
+        assert!(matches!(handle_key(&mut app, key(KeyCode::Char('S')), false), Action::StopPipeline));
+    }
+
+    #[test]
+    fn monitoring_r_restarts_pipeline() {
+        let mut app = App::new();
+        app.mode = AppMode::Monitoring;
+        assert!(matches!(handle_key(&mut app, key(KeyCode::Char('R')), false), Action::RestartPipeline));
     }
 
     #[test]

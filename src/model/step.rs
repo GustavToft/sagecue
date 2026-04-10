@@ -77,6 +77,8 @@ impl StepType {
 pub struct JobDetails {
     pub job_type: JobType,
     pub job_name: String,
+    #[allow(dead_code)]
+    pub job_arn: Option<String>,
     pub secondary_status: Option<String>,
     pub instance_type: Option<String>,
 }
@@ -191,6 +193,7 @@ mod tests {
         step.job_details = Some(JobDetails {
             job_type: JobType::Training,
             job_name: "job".to_string(),
+            job_arn: None,
             secondary_status: Some("Downloading".to_string()),
             instance_type: None,
         });

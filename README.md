@@ -85,42 +85,46 @@ Non-TUI commands for scripting, CI, and quick access.
 - [ ] `furnace status` — one-liner showing latest execution status (exit code reflects pass/fail)
 - [ ] `furnace status --watch` — poll until execution completes, with desktop notification on finish/failure
 
-### v0.3 — MLFlow Integration
+### v0.3 — Training Metrics
 
-Pull training metrics from SageMaker's managed MLFlow tracking server instead of parsing CloudWatch logs.
+Surface training metrics alongside logs so you don't have to grep CloudWatch.
 
-- [ ] Add HTTP client (`reqwest`) for MLFlow REST API (`/api/2.0/mlflow/...`)
-- [ ] Connect to SageMaker managed MLFlow endpoint (auto-discover or `--mlflow-url`)
-- [ ] Link SageMaker steps to MLFlow runs (via job name tag or run metadata)
-- [ ] New metrics panel — show loss, mAP, epoch progress alongside logs
-- [ ] Sparkline/chart widgets for metric trends using ratatui built-ins
+- [x] Metrics panel — show final metrics from `DescribeTrainingJob`
+- [x] Time-series from SageMaker Experiments (`batch_get_metrics`) for epoch/step trends
+- [x] Sparkline/chart widgets for metric trends using ratatui built-ins
+- [x] Per-step metric selection and toggling in a dedicated tab
+- [x] Poll metrics on the same async interval as step status
 - [ ] Run comparison — select two executions and diff their metrics/params side by side
 - [ ] Artifact browser — list models/files a run produced without digging through S3
-- [ ] Poll metrics on the same async interval as step status
+
+> Note: MLFlow integration was considered but dropped — metrics are pulled directly
+> from the SageMaker APIs instead.
 
 ### v0.4 — Pipeline Control
 
 Trigger operations directly from the TUI — pipeline control without leaving the terminal.
 
 - [ ] Start a new execution (with parameter overrides)
-- [ ] Stop a running execution
-- [ ] Retry a failed execution
+- [x] Stop a running execution
+- [x] Retry a failed execution
 - [ ] Action picker UI — confirmation dialog before destructive operations
-- [ ] Invocation feedback in status bar (invoking / success / error)
+- [x] Invocation feedback in status bar (invoking / success / error)
 
 ### v0.5 — Notifications
 
 Desktop alerts so you don't have to stare at the terminal.
 
-- [ ] Desktop notification when a long-running execution finishes or fails
+- [x] Desktop notification when a long-running execution finishes or fails
+- [x] Background watcher — keep getting notified after leaving the monitoring view
+- [x] Toggleable at runtime and via `--notify` flag
+- [x] macOS native notifications via `osascript` / `notify-send` on Linux
 - [ ] Configurable notification rules (notify on failure only, always, never)
-- [ ] macOS native notifications via `osascript` / `notify-send` on Linux
 
 ### v1.0 — Standalone Release
 
 Make fully configurable and publishable.
 
-- [ ] Config file (TOML) — pipelines, region, MLFlow URL, notification prefs
+- [ ] Config file (TOML) — pipelines, region, notification prefs
 - [x] Generic SageMaker pipeline support (auto-discover steps)
 - [ ] `cargo install furnace` via crates.io
 - [ ] CI/CD with GitHub Actions (build, test, release binaries)

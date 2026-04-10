@@ -1,5 +1,6 @@
 use crate::model::execution::{ExecutionSummary, PipelineExecution};
 use crate::model::logs::LogViewerState;
+use crate::model::metrics::MetricsState;
 use crate::model::pipeline::PipelineSummary;
 use crate::model::step::{StepInfo, StepStatus};
 use crate::notify;
@@ -10,6 +11,12 @@ pub enum AppMode {
     SelectPipeline,
     SelectExecution,
     Monitoring,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MonitorTab {
+    Logs,
+    Metrics,
 }
 
 pub struct App {
@@ -24,6 +31,8 @@ pub struct App {
     pub selected_step: usize,
     pub auto_follow: bool,
     pub log_viewer: LogViewerState,
+    pub active_tab: MonitorTab,
+    pub metrics_state: MetricsState,
     pub should_quit: bool,
     pub error_message: Option<String>,
     pub loading: bool,
@@ -45,6 +54,8 @@ impl App {
             selected_step: 0,
             auto_follow: true,
             log_viewer: LogViewerState::new(),
+            active_tab: MonitorTab::Logs,
+            metrics_state: MetricsState::new(),
             should_quit: false,
             error_message: None,
             loading: true,
@@ -137,6 +148,7 @@ impl App {
             let name = name.to_string();
             self.log_viewer.jump_to_end(&name);
         }
+        self.metrics_state.reset_selection();
     }
 
     /// Auto-follow: if enabled, move selection to the currently executing step
@@ -153,6 +165,13 @@ impl App {
                 return;
             }
         }
+    }
+
+    pub fn toggle_tab(&mut self) {
+        self.active_tab = match self.active_tab {
+            MonitorTab::Logs => MonitorTab::Metrics,
+            MonitorTab::Metrics => MonitorTab::Logs,
+        };
     }
 
     pub fn toggle_notifications(&mut self) {
@@ -186,6 +205,12 @@ impl App {
         {
             self.log_viewer.per_step_cache.insert(step_name, stream_state);
         }
+
+        if let (Some(step_name), Some(step_metrics)) =
+            (result.metrics_step_name, result.metrics)
+        {
+            self.metrics_state.per_step_cache.insert(step_name, step_metrics);
+        }
     }
 
     /// Transition into monitoring mode. Returns the initial step name for the poller.
@@ -194,6 +219,8 @@ impl App {
         self.auto_follow = true;
         self.selected_step = 0;
         self.log_viewer = LogViewerState::new();
+        self.active_tab = MonitorTab::Logs;
+        self.metrics_state = MetricsState::new();
         self.selected_step_name().unwrap_or_default().to_string()
     }
 
@@ -251,6 +278,7 @@ mod tests {
     fn make_poll_result(steps: Vec<StepInfo>) -> PollResult {
         PollResult {
             execution: PipelineExecution {
+                pipeline_arn: None,
                 display_name: None,
                 status: ExecutionStatus::Executing,
                 created: None,
@@ -259,6 +287,8 @@ mod tests {
             steps,
             log_step_name: None,
             log_stream_state: None,
+            metrics_step_name: None,
+            metrics: None,
         }
     }
 

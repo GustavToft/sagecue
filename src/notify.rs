@@ -195,6 +195,7 @@ mod tests {
 
     fn make_execution(status: ExecutionStatus) -> PipelineExecution {
         PipelineExecution {
+            pipeline_arn: None,
             display_name: None,
             status,
             created: None,

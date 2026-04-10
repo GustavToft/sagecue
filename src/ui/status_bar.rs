@@ -4,6 +4,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
+use crate::app::MonitorTab;
+
 fn key_span(key: &str, desc: &str) -> Vec<Span<'static>> {
     vec![
         Span::styled(
@@ -20,14 +22,39 @@ fn key_span(key: &str, desc: &str) -> Vec<Span<'static>> {
     ]
 }
 
-pub fn draw_monitor_bar(f: &mut Frame, area: Rect, notifications_enabled: bool, watcher_count: usize) {
+pub fn draw_monitor_bar(f: &mut Frame, area: Rect, notifications_enabled: bool, watcher_count: usize, is_executing: bool, active_tab: MonitorTab) {
     let mut spans: Vec<Span> = Vec::new();
     spans.extend(key_span("Esc", "Back"));
     spans.extend(key_span("q", "Quit"));
     spans.extend(key_span("↑↓", "Step"));
-    spans.extend(key_span("j/k", "Scroll"));
-    spans.extend(key_span("G/g", "End/Start"));
-    spans.extend(key_span("r", "Refresh"));
+    spans.extend(key_span("Tab", "Switch"));
+    let (logs_style, metrics_style) = match active_tab {
+        MonitorTab::Logs => (
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default().fg(Color::Rgb(80, 80, 80)),
+        ),
+        MonitorTab::Metrics => (
+            Style::default().fg(Color::Rgb(80, 80, 80)),
+            Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+        ),
+    };
+    spans.push(Span::styled("[Logs]", logs_style));
+    spans.push(Span::styled("[Metrics] ", metrics_style));
+    match active_tab {
+        MonitorTab::Logs => {
+            spans.extend(key_span("j/k", "Scroll"));
+            spans.extend(key_span("G/g", "End/Start"));
+        }
+        MonitorTab::Metrics => {
+            spans.extend(key_span("j/k", "Select"));
+            spans.extend(key_span("Space", "Toggle"));
+            spans.extend(key_span("a", "All"));
+        }
+    }
+    if is_executing {
+        spans.extend(key_span("S", "Stop"));
+    }
+    spans.extend(key_span("R", "Restart"));
     spans.extend(key_span("n", "Notify"));
     if notifications_enabled {
         spans.push(Span::styled(

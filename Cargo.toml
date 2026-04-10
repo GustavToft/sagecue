@@ -9,8 +9,14 @@ crossterm = "0.28"
 aws-config = { version = "1", features = ["behavior-version-latest"] }
 aws-sdk-sagemaker = "1"
 aws-sdk-cloudwatchlogs = "1"
+aws-sdk-sagemakermetrics = "1"
 tokio = { version = "1", features = ["full"] }
 clap = { version = "4", features = ["derive"] }
 chrono = "0.4"
 anyhow = "1"
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
 notify-rust = "4"
+uuid = { version = "1", features = ["v4"] }

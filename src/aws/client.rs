@@ -1,11 +1,13 @@
 use anyhow::Result;
 use aws_sdk_cloudwatchlogs::Client as CloudWatchLogsClient;
 use aws_sdk_sagemaker::Client as SageMakerClient;
+use aws_sdk_sagemakermetrics::Client as SageMakerMetricsClient;
 
 #[derive(Clone)]
 pub struct AwsClients {
     pub sagemaker: SageMakerClient,
     pub cloudwatch_logs: CloudWatchLogsClient,
+    pub sagemaker_metrics: SageMakerMetricsClient,
 }
 
 impl AwsClients {
@@ -18,6 +20,7 @@ impl AwsClients {
         Ok(Self {
             sagemaker: SageMakerClient::new(&config),
             cloudwatch_logs: CloudWatchLogsClient::new(&config),
+            sagemaker_metrics: SageMakerMetricsClient::new(&config),
         })
     }
 }

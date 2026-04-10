@@ -1,8 +1,11 @@
 use anyhow::{Context, Result};
 use aws_sdk_sagemaker::Client;
+use aws_sdk_sagemakermetrics::Client as MetricsClient;
 use chrono::{DateTime, Utc};
 
+use crate::aws::sagemaker_metrics;
 use crate::model::execution::{ExecutionStatus, ExecutionSummary, PipelineExecution};
+use crate::model::metrics::{MetricDataPoint, StepMetrics};
 use crate::model::pipeline::PipelineSummary;
 use crate::model::step::{JobDetails, JobType, StepInfo, StepStatus, StepType};
 
@@ -73,6 +76,7 @@ pub async fn describe_execution(
         .context("Failed to describe pipeline execution")?;
 
     Ok(PipelineExecution {
+        pipeline_arn: resp.pipeline_arn().map(|s| s.to_string()),
         display_name: resp
             .pipeline_execution_display_name()
             .map(|s| s.to_string()),
@@ -85,6 +89,33 @@ pub async fn describe_execution(
     })
 }
 
+pub async fn stop_pipeline_execution(client: &Client, execution_arn: &str) -> Result<()> {
+    let token = uuid::Uuid::new_v4().to_string();
+    client
+        .stop_pipeline_execution()
+        .pipeline_execution_arn(execution_arn)
+        .client_request_token(token)
+        .send()
+        .await
+        .context("Failed to stop pipeline execution")?;
+    Ok(())
+}
+
+pub async fn start_pipeline_execution(client: &Client, pipeline_name: &str) -> Result<String> {
+    let token = uuid::Uuid::new_v4().to_string();
+    let resp = client
+        .start_pipeline_execution()
+        .pipeline_name(pipeline_name)
+        .client_request_token(token)
+        .send()
+        .await
+        .context("Failed to start pipeline execution")?;
+
+    resp.pipeline_execution_arn()
+        .map(|s| s.to_string())
+        .context("No execution ARN returned from start_pipeline_execution")
+}
+
 /// Extract step type and optional job details from step metadata.
 fn extract_step_type_and_job(
     meta: &aws_sdk_sagemaker::types::PipelineExecutionStepMetadata,
@@ -94,8 +125,8 @@ fn extract_step_type_and_job(
             let job_name = arn.rsplit('/').next().unwrap_or_default().to_string();
             JobDetails {
                 job_type: JobType::Training,
-
                 job_name,
+                job_arn: Some(arn.to_string()),
                 secondary_status: None,
                 instance_type: None,
             }
@@ -108,8 +139,8 @@ fn extract_step_type_and_job(
             let job_name = arn.rsplit('/').next().unwrap_or_default().to_string();
             JobDetails {
                 job_type: JobType::Processing,
-
                 job_name,
+                job_arn: Some(arn.to_string()),
                 secondary_status: None,
                 instance_type: None,
             }
@@ -122,8 +153,8 @@ fn extract_step_type_and_job(
             let job_name = arn.rsplit('/').next().unwrap_or_default().to_string();
             JobDetails {
                 job_type: JobType::Transform,
-
                 job_name,
+                job_arn: Some(arn.to_string()),
                 secondary_status: None,
                 instance_type: None,
             }
@@ -199,6 +230,126 @@ pub async fn list_steps(client: &Client, execution_arn: &str) -> Result<Vec<Step
     });
 
     Ok(steps)
+}
+
+/// Fetch final metrics from DescribeTrainingJob's final_metric_data_list.
+pub async fn fetch_final_training_metrics(
+    client: &Client,
+    job_name: &str,
+) -> Result<Vec<MetricDataPoint>> {
+    let resp = client
+        .describe_training_job()
+        .training_job_name(job_name)
+        .send()
+        .await
+        .context("Failed to describe training job for metrics")?;
+
+    let points: Vec<MetricDataPoint> = resp
+        .final_metric_data_list()
+        .iter()
+        .filter_map(|m| {
+            let name = m.metric_name()?.to_string();
+            let value = m.value()? as f64;
+            let timestamp = m.timestamp().and_then(|t| {
+                DateTime::from_timestamp(t.secs(), t.subsec_nanos())
+            })?;
+            Some(MetricDataPoint {
+                metric_name: name,
+                timestamp,
+                value,
+            })
+        })
+        .collect();
+
+    Ok(points)
+}
+
+/// Fetch both final metrics and experiment time-series for a training job.
+/// Discovers all metric names from the trial component, then fetches time-series for each.
+pub async fn fetch_all_training_metrics(
+    sagemaker_client: &Client,
+    metrics_client: &MetricsClient,
+    job_name: &str,
+    job_arn: &str,
+) -> Result<StepMetrics> {
+    let final_metrics =
+        fetch_final_training_metrics(sagemaker_client, job_name).await?;
+
+    tracing::info!(
+        job_name = %job_name,
+        job_arn = %job_arn,
+        final_metrics_count = final_metrics.len(),
+        final_metric_names = ?final_metrics.iter().map(|m| &m.metric_name).collect::<Vec<_>>(),
+        "fetching experiment metrics"
+    );
+
+    // Look up trial component ARN from training job ARN
+    let experiment_series = match sagemaker_metrics::find_trial_component_arn(sagemaker_client, job_arn).await {
+        Ok(Some(tc_arn)) => {
+            tracing::info!(tc_arn = %tc_arn, "found trial component");
+
+            // Discover all metric names from the trial component
+            let metric_names = match sagemaker_metrics::discover_metric_names(sagemaker_client, &tc_arn).await {
+                Ok(names) => {
+                    tracing::info!(
+                        discovered_count = names.len(),
+                        discovered_names = ?names,
+                        "discovered metric names from trial component"
+                    );
+                    names
+                }
+                Err(e) => {
+                    let fallback: Vec<String> = final_metrics.iter().map(|m| m.metric_name.clone()).collect();
+                    tracing::warn!(
+                        error = ?e,
+                        fallback_count = fallback.len(),
+                        "metric name discovery failed, falling back to final metrics"
+                    );
+                    fallback
+                }
+            };
+
+            if metric_names.is_empty() {
+                tracing::warn!("no metric names to query");
+                Vec::new()
+            } else {
+                tracing::info!(querying_count = metric_names.len(), "calling batch_get_metrics");
+                match sagemaker_metrics::fetch_experiment_metrics(
+                    metrics_client,
+                    &tc_arn,
+                    &metric_names,
+                )
+                .await
+                {
+                    Ok(series) => {
+                        tracing::info!(
+                            series_with_data = series.len(),
+                            series_names = ?series.iter().map(|s| &s.metric_name).collect::<Vec<_>>(),
+                            "batch_get_metrics returned"
+                        );
+                        series
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "experiment metrics fetch failed");
+                        Vec::new()
+                    }
+                }
+            }
+        }
+        Ok(None) => {
+            tracing::warn!(job_arn = %job_arn, "no trial component found for training job");
+            Vec::new()
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "trial component lookup failed");
+            Vec::new()
+        }
+    };
+
+    Ok(StepMetrics {
+        final_metrics,
+        experiment_series,
+    })
 }
 
 pub async fn enrich_job_details(client: &Client, step: &mut StepInfo) -> Result<()> {
