@@ -342,9 +342,9 @@ dependencies = [
 
 [[package]]
 name = "aws-sdk-sagemaker"
-version = "1.184.0"
+version = "1.185.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "027795c4ad69e65834ae409872bddd9de5373bdc4e70cf97c8cfe944da51972b"
+checksum = "e9e30909dcc38c47871bf7c3df1428cb92a1b7f70c0b2f7d7b97e7a6d4e3e9af"
 dependencies = [
  "aws-credential-types",
  "aws-runtime",
