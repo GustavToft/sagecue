@@ -1,7 +1,7 @@
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::app::App;
@@ -21,12 +21,13 @@ pub fn draw(f: &mut Frame, app: &App) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
+    let error_height: u16 = if editor.error.is_some() { 4 } else { 0 };
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(1),    // body
-            Constraint::Length(1), // error line
-            Constraint::Length(1), // footer hint
+            Constraint::Min(1),               // body
+            Constraint::Length(error_height), // error block (wrapped)
+            Constraint::Length(1),            // footer hint
         ])
         .split(inner);
 
@@ -93,7 +94,8 @@ pub fn draw(f: &mut Frame, app: &App) {
 
     if let Some(ref err) = editor.error {
         let p = Paragraph::new(format!("Error: {}", err))
-            .style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD));
+            .style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
+            .wrap(Wrap { trim: true });
         f.render_widget(p, chunks[1]);
     }
 

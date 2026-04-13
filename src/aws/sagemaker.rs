@@ -207,47 +207,57 @@ fn json_value_to_string(v: &serde_json::Value) -> Option<String> {
     }
 }
 
-/// Fetch the parameter values used in the most recent execution of the pipeline.
-/// Used as a fallback for required (no-default) parameters when pre-populating
-/// the editor. Returns an empty map if no executions exist or the call fails.
+/// Walk the most recent executions and return the parameter values from the
+/// first one that has any. Executions that were stopped before launch often
+/// have no recorded parameters, so we skip them rather than pre-filling empty.
+/// Returns an empty map if nothing suitable is found or the calls fail.
 async fn latest_execution_parameter_values(
     client: &Client,
     pipeline_name: &str,
 ) -> Result<HashMap<String, String>> {
+    const LOOKBACK: i32 = 10;
+
     let executions = client
         .list_pipeline_executions()
         .pipeline_name(pipeline_name)
-        .max_results(1)
+        .max_results(LOOKBACK)
         .send()
         .await
-        .context("Failed to list latest pipeline execution")?;
+        .context("Failed to list recent pipeline executions")?;
 
-    let Some(latest_arn) = executions
-        .pipeline_execution_summaries()
-        .first()
-        .and_then(|s| s.pipeline_execution_arn())
-    else {
-        return Ok(HashMap::new());
-    };
+    for summary in executions.pipeline_execution_summaries() {
+        let Some(arn) = summary.pipeline_execution_arn() else {
+            continue;
+        };
+        let resp = match client
+            .list_pipeline_parameters_for_execution()
+            .pipeline_execution_arn(arn)
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(error = %e, arn = %arn, "failed to list parameters for execution");
+                continue;
+            }
+        };
 
-    let resp = client
-        .list_pipeline_parameters_for_execution()
-        .pipeline_execution_arn(latest_arn)
-        .send()
-        .await
-        .context("Failed to list parameters for latest execution")?;
+        let map: HashMap<String, String> = resp
+            .pipeline_parameters()
+            .iter()
+            .filter_map(|p| {
+                let name = p.name()?.to_string();
+                let value = p.value()?.to_string();
+                Some((name, value))
+            })
+            .collect();
 
-    let map = resp
-        .pipeline_parameters()
-        .iter()
-        .filter_map(|p| {
-            let name = p.name()?.to_string();
-            let value = p.value()?.to_string();
-            Some((name, value))
-        })
-        .collect();
+        if !map.is_empty() {
+            return Ok(map);
+        }
+    }
 
-    Ok(map)
+    Ok(HashMap::new())
 }
 
 /// Extract step type and optional job details from step metadata.
