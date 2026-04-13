@@ -108,6 +108,7 @@ pub fn draw_execution_list_bar(f: &mut Frame, area: Rect) {
     spans.extend(key_span("q", "Quit"));
     spans.extend(key_span("↑↓", "Select"));
     spans.extend(key_span("Enter", "Monitor"));
+    spans.extend(key_span("N", "New execution"));
 
     let line = Line::from(spans);
     let bar = Paragraph::new(line).style(Style::default().bg(Color::DarkGray));

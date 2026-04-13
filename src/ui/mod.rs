@@ -2,6 +2,7 @@ pub mod execution_list;
 pub mod header;
 pub mod logs;
 pub mod metrics;
+pub mod parameter_editor;
 pub mod pipeline_list;
 pub mod status_bar;
 pub mod steps;
@@ -19,6 +20,10 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         AppMode::SelectPipeline => draw_pipeline_list(f, app),
         AppMode::SelectExecution => draw_execution_list(f, app),
         AppMode::Monitoring => draw_monitor(f, app),
+    }
+
+    if app.parameter_editor.is_some() {
+        parameter_editor::draw(f, app);
     }
 }
 

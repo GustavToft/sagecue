@@ -50,10 +50,11 @@ sagecue --pipeline my-pipeline --region us-east-1
 
 ### Execution Selection
 
-| Key       | Action              |
-|-----------|---------------------|
-| `↑` `↓`  | Navigate executions |
-| `Enter`   | Monitor execution   |
+| Key       | Action                                      |
+|-----------|---------------------------------------------|
+| `↑` `↓`  | Navigate executions                         |
+| `Enter`   | Monitor execution                           |
+| `N`       | Start a new execution (parameter overrides) |
 
 ### Monitoring
 
@@ -95,7 +96,8 @@ sagecue --pipeline my-pipeline --region us-east-1
 - [x] Poll metrics on the same async interval as step status
 - [ ] Run comparison — select two executions and diff their metrics/params side by side
 - [ ] Artifact browser — list models/files a run produced without digging through S3
-- [ ] Start a new execution (with parameter overrides)
+- [x] Start a new execution (with parameter overrides)
+- [ ] Friendlier AWS error messages — raw `ValidationException` / SDK errors are hard to read; extract the human-readable reason and hide the wire-format noise
 - [x] Stop a running execution
 - [x] Retry a failed execution
 - [ ] Action picker UI — confirmation dialog before destructive operations

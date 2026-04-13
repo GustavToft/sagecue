@@ -3,7 +3,7 @@ use chrono::{DateTime, Utc};
 use crate::model::execution::{ExecutionSummary, PipelineExecution};
 use crate::model::logs::LogViewerState;
 use crate::model::metrics::MetricsState;
-use crate::model::pipeline::PipelineSummary;
+use crate::model::pipeline::{PipelineParameter, PipelineSummary};
 use crate::model::step::{StepInfo, StepStatus};
 use crate::notify;
 use crate::polling::{MonitoringUpdate, PollError, PollResult};
@@ -39,6 +39,32 @@ pub enum MonitorTab {
     Metrics,
 }
 
+#[derive(Debug, Clone)]
+pub struct ParameterEditorState {
+    pub pipeline_name: String,
+    pub parameters: Vec<PipelineParameter>,
+    pub values: Vec<String>,
+    pub cursor: usize,
+    pub loading: bool,
+    pub error: Option<String>,
+}
+
+impl ParameterEditorState {
+    /// Return `(name, value)` pairs to send to SageMaker on start. Required
+    /// parameters are always included; optional parameters are only included
+    /// when the user changed them from their definition default.
+    pub fn overrides(&self) -> Vec<(String, String)> {
+        self.parameters
+            .iter()
+            .zip(self.values.iter())
+            .filter_map(|(p, v)| match &p.default_value {
+                Some(default) if default == v => None,
+                _ => Some((p.name.clone(), v.clone())),
+            })
+            .collect()
+    }
+}
+
 pub struct App {
     pub mode: AppMode,
     pub pipelines: Vec<PipelineSummary>,
@@ -63,6 +89,8 @@ pub struct App {
     pub last_poll_error: Option<PollError>,
     /// Timestamp of the most recent successful poll (any variant).
     pub last_successful_poll: Option<DateTime<Utc>>,
+    /// Active parameter editor overlay, if any.
+    pub parameter_editor: Option<ParameterEditorState>,
 }
 
 impl App {
@@ -88,6 +116,71 @@ impl App {
             background_watcher_count: 0,
             last_poll_error: None,
             last_successful_poll: None,
+            parameter_editor: None,
+        }
+    }
+
+    pub fn open_parameter_editor(&mut self, pipeline_name: String) {
+        self.parameter_editor = Some(ParameterEditorState {
+            pipeline_name,
+            parameters: Vec::new(),
+            values: Vec::new(),
+            cursor: 0,
+            loading: true,
+            error: None,
+        });
+    }
+
+    pub fn populate_parameter_editor(&mut self, parameters: Vec<PipelineParameter>) {
+        if let Some(editor) = self.parameter_editor.as_mut() {
+            editor.values = parameters.iter().map(|p| p.initial_value.clone()).collect();
+            editor.parameters = parameters;
+            editor.cursor = 0;
+            editor.loading = false;
+        }
+    }
+
+    pub fn close_parameter_editor(&mut self) {
+        self.parameter_editor = None;
+    }
+
+    pub fn parameter_editor_cursor_up(&mut self) {
+        if let Some(editor) = self.parameter_editor.as_mut() {
+            if editor.cursor > 0 {
+                editor.cursor -= 1;
+            }
+        }
+    }
+
+    pub fn parameter_editor_cursor_down(&mut self) {
+        if let Some(editor) = self.parameter_editor.as_mut() {
+            if editor.cursor + 1 < editor.values.len() {
+                editor.cursor += 1;
+            }
+        }
+    }
+
+    pub fn parameter_editor_input(&mut self, c: char) {
+        if let Some(editor) = self.parameter_editor.as_mut() {
+            if let Some(value) = editor.values.get_mut(editor.cursor) {
+                value.push(c);
+            }
+        }
+    }
+
+    pub fn parameter_editor_backspace(&mut self) {
+        if let Some(editor) = self.parameter_editor.as_mut() {
+            if let Some(value) = editor.values.get_mut(editor.cursor) {
+                value.pop();
+            }
+        }
+    }
+
+    pub fn parameter_editor_clear_field(&mut self) {
+        if let Some(editor) = self.parameter_editor.as_mut() {
+            if let Some(value) = editor.values.get_mut(editor.cursor) {
+                value.clear();
+            }
         }
     }
 
@@ -759,5 +852,157 @@ mod tests {
         let now = Utc::now();
         let t = now - chrono::Duration::seconds(STALE_THRESHOLD_SECS + 1);
         assert_eq!(stale_level(Some(t), now), StaleLevel::Stale);
+    }
+
+    // --- parameter editor ---
+
+    fn make_params() -> Vec<PipelineParameter> {
+        vec![
+            PipelineParameter {
+                name: "batch_size".to_string(),
+                type_name: "Integer".to_string(),
+                default_value: Some("32".to_string()),
+                initial_value: "32".to_string(),
+            },
+            PipelineParameter {
+                name: "model".to_string(),
+                type_name: "String".to_string(),
+                default_value: Some("resnet50".to_string()),
+                initial_value: "resnet50".to_string(),
+            },
+        ]
+    }
+
+    #[test]
+    fn open_parameter_editor_sets_loading() {
+        let mut app = App::new();
+        app.open_parameter_editor("p1".to_string());
+        let editor = app.parameter_editor.as_ref().unwrap();
+        assert!(editor.loading);
+        assert_eq!(editor.pipeline_name, "p1");
+        assert!(editor.parameters.is_empty());
+    }
+
+    #[test]
+    fn populate_parameter_editor_fills_defaults() {
+        let mut app = App::new();
+        app.open_parameter_editor("p1".to_string());
+        app.populate_parameter_editor(make_params());
+        let editor = app.parameter_editor.as_ref().unwrap();
+        assert!(!editor.loading);
+        assert_eq!(
+            editor.values,
+            vec!["32".to_string(), "resnet50".to_string()]
+        );
+        assert_eq!(editor.cursor, 0);
+    }
+
+    #[test]
+    fn parameter_editor_cursor_bounds() {
+        let mut app = App::new();
+        app.open_parameter_editor("p1".to_string());
+        app.populate_parameter_editor(make_params());
+        app.parameter_editor_cursor_up();
+        assert_eq!(app.parameter_editor.as_ref().unwrap().cursor, 0);
+        app.parameter_editor_cursor_down();
+        assert_eq!(app.parameter_editor.as_ref().unwrap().cursor, 1);
+        app.parameter_editor_cursor_down();
+        assert_eq!(app.parameter_editor.as_ref().unwrap().cursor, 1);
+    }
+
+    #[test]
+    fn parameter_editor_input_appends_to_selected_only() {
+        let mut app = App::new();
+        app.open_parameter_editor("p1".to_string());
+        app.populate_parameter_editor(make_params());
+        app.parameter_editor_cursor_down();
+        app.parameter_editor_input('x');
+        let editor = app.parameter_editor.as_ref().unwrap();
+        assert_eq!(editor.values[0], "32");
+        assert_eq!(editor.values[1], "resnet50x");
+    }
+
+    #[test]
+    fn parameter_editor_backspace_removes_from_selected() {
+        let mut app = App::new();
+        app.open_parameter_editor("p1".to_string());
+        app.populate_parameter_editor(make_params());
+        app.parameter_editor_backspace();
+        assert_eq!(app.parameter_editor.as_ref().unwrap().values[0], "3");
+    }
+
+    #[test]
+    fn parameter_editor_clear_field_empties_selected() {
+        let mut app = App::new();
+        app.open_parameter_editor("p1".to_string());
+        app.populate_parameter_editor(make_params());
+        app.parameter_editor_clear_field();
+        assert_eq!(app.parameter_editor.as_ref().unwrap().values[0], "");
+    }
+
+    #[test]
+    fn close_parameter_editor_clears_state() {
+        let mut app = App::new();
+        app.open_parameter_editor("p1".to_string());
+        app.close_parameter_editor();
+        assert!(app.parameter_editor.is_none());
+    }
+
+    #[test]
+    fn parameter_editor_overrides_only_includes_changes() {
+        let mut app = App::new();
+        app.open_parameter_editor("p1".to_string());
+        app.populate_parameter_editor(make_params());
+        app.parameter_editor_input('0'); // "32" -> "320"
+        let editor = app.parameter_editor.as_ref().unwrap();
+        let overrides = editor.overrides();
+        assert_eq!(
+            overrides,
+            vec![("batch_size".to_string(), "320".to_string())]
+        );
+    }
+
+    #[test]
+    fn parameter_editor_overrides_always_includes_required() {
+        let mut app = App::new();
+        app.open_parameter_editor("p1".to_string());
+        app.populate_parameter_editor(vec![
+            PipelineParameter {
+                name: "optional_with_default".to_string(),
+                type_name: "String".to_string(),
+                default_value: Some("keep".to_string()),
+                initial_value: "keep".to_string(),
+            },
+            PipelineParameter {
+                name: "required_pre_filled".to_string(),
+                type_name: "String".to_string(),
+                default_value: None,
+                initial_value: "latest-run-value".to_string(),
+            },
+        ]);
+        let overrides = app.parameter_editor.as_ref().unwrap().overrides();
+        assert_eq!(
+            overrides,
+            vec![(
+                "required_pre_filled".to_string(),
+                "latest-run-value".to_string()
+            )]
+        );
+    }
+
+    #[test]
+    fn populate_parameter_editor_uses_initial_value_for_required() {
+        let mut app = App::new();
+        app.open_parameter_editor("p1".to_string());
+        app.populate_parameter_editor(vec![PipelineParameter {
+            name: "token".to_string(),
+            type_name: "String".to_string(),
+            default_value: None,
+            initial_value: "from-last-run".to_string(),
+        }]);
+        assert_eq!(
+            app.parameter_editor.as_ref().unwrap().values,
+            vec!["from-last-run".to_string()]
+        );
     }
 }

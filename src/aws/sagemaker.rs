@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use anyhow::{Context, Result};
 use aws_sdk_sagemaker::Client;
 use aws_sdk_sagemakermetrics::Client as MetricsClient;
@@ -6,7 +8,7 @@ use chrono::{DateTime, Utc};
 use crate::aws::sagemaker_metrics;
 use crate::model::execution::{ExecutionStatus, ExecutionSummary, PipelineExecution};
 use crate::model::metrics::{MetricDataPoint, StepMetrics};
-use crate::model::pipeline::PipelineSummary;
+use crate::model::pipeline::{PipelineParameter, PipelineSummary};
 use crate::model::step::{JobDetails, JobType, StepInfo, StepStatus, StepType};
 
 fn to_chrono(dt: &aws_sdk_sagemaker::primitives::DateTime) -> Option<DateTime<Utc>> {
@@ -98,12 +100,32 @@ pub async fn stop_pipeline_execution(client: &Client, execution_arn: &str) -> Re
     Ok(())
 }
 
-pub async fn start_pipeline_execution(client: &Client, pipeline_name: &str) -> Result<String> {
+pub async fn start_pipeline_execution(
+    client: &Client,
+    pipeline_name: &str,
+    parameter_overrides: Vec<(String, String)>,
+) -> Result<String> {
     let token = uuid::Uuid::new_v4().to_string();
-    let resp = client
+
+    let mut builder = client
         .start_pipeline_execution()
         .pipeline_name(pipeline_name)
-        .client_request_token(token)
+        .client_request_token(token);
+
+    if !parameter_overrides.is_empty() {
+        let params: Vec<_> = parameter_overrides
+            .into_iter()
+            .map(|(name, value)| {
+                aws_sdk_sagemaker::types::Parameter::builder()
+                    .name(name)
+                    .value(value)
+                    .build()
+            })
+            .collect();
+        builder = builder.set_pipeline_parameters(Some(params));
+    }
+
+    let resp = builder
         .send()
         .await
         .context("Failed to start pipeline execution")?;
@@ -111,6 +133,131 @@ pub async fn start_pipeline_execution(client: &Client, pipeline_name: &str) -> R
     resp.pipeline_execution_arn()
         .map(|s| s.to_string())
         .context("No execution ARN returned from start_pipeline_execution")
+}
+
+/// Fetch parameter definitions from a pipeline's definition JSON and fill
+/// each entry's `initial_value` from (in priority order): the definition's
+/// `DefaultValue`, the latest execution's run value, or an empty string.
+///
+/// Returns an empty vec if the pipeline has no parameters or the definition
+/// cannot be parsed — callers can still submit a start with no overrides.
+pub async fn describe_pipeline_parameters(
+    client: &Client,
+    pipeline_name: &str,
+) -> Result<Vec<PipelineParameter>> {
+    let resp = client
+        .describe_pipeline()
+        .pipeline_name(pipeline_name)
+        .send()
+        .await
+        .context("Failed to describe pipeline")?;
+
+    let Some(definition) = resp.pipeline_definition() else {
+        return Ok(Vec::new());
+    };
+
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(definition) else {
+        tracing::warn!(pipeline = %pipeline_name, "failed to parse pipeline definition JSON");
+        return Ok(Vec::new());
+    };
+
+    let Some(params) = json.get("Parameters").and_then(|v| v.as_array()) else {
+        return Ok(Vec::new());
+    };
+
+    // Best-effort lookup of the most recent execution's parameter values so we
+    // can pre-fill required params. A failure here is non-fatal.
+    let latest_values = latest_execution_parameter_values(client, pipeline_name)
+        .await
+        .unwrap_or_default();
+
+    let parameters = params
+        .iter()
+        .filter_map(|p| {
+            let name = p.get("Name")?.as_str()?.to_string();
+            let type_name = p
+                .get("Type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("String")
+                .to_string();
+            let default_value = p.get("DefaultValue").and_then(json_value_to_string);
+            let initial_value = default_value
+                .clone()
+                .or_else(|| latest_values.get(&name).cloned())
+                .unwrap_or_default();
+            Some(PipelineParameter {
+                name,
+                type_name,
+                default_value,
+                initial_value,
+            })
+        })
+        .collect();
+
+    Ok(parameters)
+}
+
+fn json_value_to_string(v: &serde_json::Value) -> Option<String> {
+    match v {
+        serde_json::Value::String(s) => Some(s.clone()),
+        serde_json::Value::Number(n) => Some(n.to_string()),
+        serde_json::Value::Bool(b) => Some(b.to_string()),
+        serde_json::Value::Null => None,
+        _ => None,
+    }
+}
+
+/// Walk the most recent executions and return the parameter values from the
+/// first one that has any. Executions that were stopped before launch often
+/// have no recorded parameters, so we skip them rather than pre-filling empty.
+/// Returns an empty map if nothing suitable is found or the calls fail.
+async fn latest_execution_parameter_values(
+    client: &Client,
+    pipeline_name: &str,
+) -> Result<HashMap<String, String>> {
+    const LOOKBACK: i32 = 10;
+
+    let executions = client
+        .list_pipeline_executions()
+        .pipeline_name(pipeline_name)
+        .max_results(LOOKBACK)
+        .send()
+        .await
+        .context("Failed to list recent pipeline executions")?;
+
+    for summary in executions.pipeline_execution_summaries() {
+        let Some(arn) = summary.pipeline_execution_arn() else {
+            continue;
+        };
+        let resp = match client
+            .list_pipeline_parameters_for_execution()
+            .pipeline_execution_arn(arn)
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(error = %e, arn = %arn, "failed to list parameters for execution");
+                continue;
+            }
+        };
+
+        let map: HashMap<String, String> = resp
+            .pipeline_parameters()
+            .iter()
+            .filter_map(|p| {
+                let name = p.name()?.to_string();
+                let value = p.value()?.to_string();
+                Some((name, value))
+            })
+            .collect();
+
+        if !map.is_empty() {
+            return Ok(map);
+        }
+    }
+
+    Ok(HashMap::new())
 }
 
 /// Extract step type and optional job details from step metadata.
