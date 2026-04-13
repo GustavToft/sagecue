@@ -272,6 +272,7 @@ async fn run_app(
                             match aws::sagemaker::start_pipeline_execution(
                                 &clients.sagemaker,
                                 &name,
+                                Vec::new(),
                             )
                             .await
                             {
@@ -299,6 +300,50 @@ async fn run_app(
                     }
                     Action::ToggleNotifications => {
                         app.toggle_notifications();
+                    }
+                    Action::OpenStartExecutionEditor { pipeline_name } => {
+                        app.open_parameter_editor(pipeline_name.clone());
+                        // Force a redraw before the blocking describe call.
+                        terminal.draw(|f| ui::draw(f, &mut app))?;
+                        match aws::sagemaker::describe_pipeline_parameters(
+                            &clients.sagemaker,
+                            &pipeline_name,
+                        )
+                        .await
+                        {
+                            Ok(params) => app.populate_parameter_editor(params),
+                            Err(e) => {
+                                if let Some(ed) = app.parameter_editor.as_mut() {
+                                    ed.loading = false;
+                                    ed.error = Some(format!("{:#}", e));
+                                }
+                            }
+                        }
+                    }
+                    Action::SubmitStartExecution {
+                        pipeline_name,
+                        overrides,
+                    } => {
+                        match aws::sagemaker::start_pipeline_execution(
+                            &clients.sagemaker,
+                            &pipeline_name,
+                            overrides,
+                        )
+                        .await
+                        {
+                            Ok(_arn) => {
+                                app.close_parameter_editor();
+                                let _ = force_tx.send(());
+                            }
+                            Err(e) => {
+                                if let Some(ed) = app.parameter_editor.as_mut() {
+                                    ed.error = Some(format!("{:#}", e));
+                                }
+                            }
+                        }
+                    }
+                    Action::CancelStartExecution => {
+                        app.close_parameter_editor();
                     }
                     Action::BackToPipelines => {
                         // Stop polling the execution list and clear any

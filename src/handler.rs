@@ -6,14 +6,31 @@ use crate::app::{App, AppMode, MonitorTab};
 pub enum Action {
     None,
     Quit,
-    LoadExecutions { pipeline_name: String },
-    StartMonitoring { arn: String, step_name: String },
-    StepChanged { step_name: String },
-    BackToExecutions { pipeline_name: String },
+    LoadExecutions {
+        pipeline_name: String,
+    },
+    StartMonitoring {
+        arn: String,
+        step_name: String,
+    },
+    StepChanged {
+        step_name: String,
+    },
+    BackToExecutions {
+        pipeline_name: String,
+    },
     BackToPipelines,
     ToggleNotifications,
     StopPipeline,
     RestartPipeline,
+    OpenStartExecutionEditor {
+        pipeline_name: String,
+    },
+    SubmitStartExecution {
+        pipeline_name: String,
+        overrides: Vec<(String, String)>,
+    },
+    CancelStartExecution,
 }
 
 /// Pure key handler: mutates App state and returns an Action for the caller.
@@ -22,6 +39,12 @@ pub fn handle_key(app: &mut App, key: KeyEvent, has_pipeline_flag: bool) -> Acti
     // Ctrl+C always quits
     if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
         return Action::Quit;
+    }
+
+    // Parameter editor overlay captures keys before anything else so letters
+    // (including `q`) can be typed as parameter values.
+    if app.parameter_editor.is_some() {
+        return handle_parameter_editor(app, key);
     }
 
     // q always quits
@@ -33,6 +56,45 @@ pub fn handle_key(app: &mut App, key: KeyEvent, has_pipeline_flag: bool) -> Acti
         AppMode::SelectPipeline => handle_select_pipeline(app, key),
         AppMode::SelectExecution => handle_select_execution(app, key, has_pipeline_flag),
         AppMode::Monitoring => handle_monitoring(app, key),
+    }
+}
+
+fn handle_parameter_editor(app: &mut App, key: KeyEvent) -> Action {
+    match key.code {
+        KeyCode::Esc => Action::CancelStartExecution,
+        KeyCode::Up => {
+            app.parameter_editor_cursor_up();
+            Action::None
+        }
+        KeyCode::Down => {
+            app.parameter_editor_cursor_down();
+            Action::None
+        }
+        KeyCode::Enter => {
+            let Some(editor) = app.parameter_editor.as_ref() else {
+                return Action::None;
+            };
+            if editor.loading {
+                return Action::None;
+            }
+            Action::SubmitStartExecution {
+                pipeline_name: editor.pipeline_name.clone(),
+                overrides: editor.overrides(),
+            }
+        }
+        KeyCode::Backspace => {
+            app.parameter_editor_backspace();
+            Action::None
+        }
+        KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.parameter_editor_clear_field();
+            Action::None
+        }
+        KeyCode::Char(c) => {
+            app.parameter_editor_input(c);
+            Action::None
+        }
+        _ => Action::None,
     }
 }
 
@@ -89,6 +151,15 @@ fn handle_select_execution(app: &mut App, key: KeyEvent, has_pipeline_flag: bool
                 let arn = arn.to_string();
                 let step_name = app.enter_monitoring(&arn);
                 Action::StartMonitoring { arn, step_name }
+            } else {
+                Action::None
+            }
+        }
+        KeyCode::Char('N') => {
+            if let Some(name) = app.selected_pipeline_name.clone() {
+                Action::OpenStartExecutionEditor {
+                    pipeline_name: name,
+                }
             } else {
                 Action::None
             }
