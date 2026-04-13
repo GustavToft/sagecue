@@ -10,8 +10,11 @@ Real-time TUI monitor for ML pipeline executions on AWS SageMaker.
 - **Execution browser** — List and select from recent pipeline executions, color-coded by status
 - **Live step tracking** — Watch pipeline steps progress in real-time with auto-follow on the active step
 - **Log streaming** — Stream CloudWatch logs per step with scrollable history and auto-scroll
+- **Metrics panel** — Final metrics and time-series from SageMaker Experiments rendered as sparklines, with per-step selection
+- **Pipeline control** — Stop or retry executions directly from the TUI
+- **Desktop notifications** — Native macOS/Linux alerts on completion or failure, with a background watcher that keeps notifying after you leave the monitoring view
 - **Job enrichment** — See instance types, secondary status, and failure reasons pulled from SageMaker job details
-- **Background polling** — Async 5-second refresh cycle with manual force-refresh
+- **Background polling** — Async 5-second refresh cycle
 
 ## Quick Start
 
@@ -54,13 +57,18 @@ sagecue --pipeline my-pipeline --region us-east-1
 
 ### Monitoring
 
-| Key       | Action                        |
-|-----------|-------------------------------|
-| `↑` `↓`  | Select step                   |
-| `j` `k`  | Scroll logs                   |
-| `g`       | Jump to top of logs           |
-| `G`       | Jump to end, re-enable follow |
-| `r`       | Force refresh                 |
+| Key       | Action                                         |
+|-----------|------------------------------------------------|
+| `↑` `↓`  | Select step                                    |
+| `Tab`     | Switch between Logs and Metrics tabs           |
+| `j` `k`  | Scroll logs / move metrics cursor              |
+| `g`       | Jump to top of logs                            |
+| `G`       | Jump to end of logs, re-enable follow          |
+| `Space`   | Toggle selected metric (Metrics tab)           |
+| `a`       | Toggle all metrics (Metrics tab)               |
+| `n`       | Toggle desktop notifications                   |
+| `S`       | Stop the running execution                     |
+| `R`       | Retry the current execution                    |
 
 ## Requirements
 
@@ -75,20 +83,11 @@ sagecue --pipeline my-pipeline --region us-east-1
 
 ---
 
-## Roadmap
-
-### v0.2 — CLI Commands
-
-Non-TUI commands for scripting, CI, and quick access.
+## Improvements
 
 - [ ] `sagecue run` — start a pipeline execution from the shell (with optional parameter overrides)
 - [ ] `sagecue status` — one-liner showing latest execution status (exit code reflects pass/fail)
 - [ ] `sagecue status --watch` — poll until execution completes, with desktop notification on finish/failure
-
-### v0.3 — Training Metrics
-
-Surface training metrics alongside logs so you don't have to grep CloudWatch.
-
 - [x] Metrics panel — show final metrics from `DescribeTrainingJob`
 - [x] Time-series from SageMaker Experiments (`batch_get_metrics`) for epoch/step trends
 - [x] Sparkline/chart widgets for metric trends using ratatui built-ins
@@ -96,35 +95,17 @@ Surface training metrics alongside logs so you don't have to grep CloudWatch.
 - [x] Poll metrics on the same async interval as step status
 - [ ] Run comparison — select two executions and diff their metrics/params side by side
 - [ ] Artifact browser — list models/files a run produced without digging through S3
-
-> Note: MLFlow integration was considered but dropped — metrics are pulled directly
-> from the SageMaker APIs instead.
-
-### v0.4 — Pipeline Control
-
-Trigger operations directly from the TUI — pipeline control without leaving the terminal.
-
 - [ ] Start a new execution (with parameter overrides)
 - [x] Stop a running execution
 - [x] Retry a failed execution
 - [ ] Action picker UI — confirmation dialog before destructive operations
 - [x] Invocation feedback in status bar (invoking / success / error)
-
-### v0.5 — Notifications
-
-Desktop alerts so you don't have to stare at the terminal.
-
 - [x] Desktop notification when a long-running execution finishes or fails
 - [x] Background watcher — keep getting notified after leaving the monitoring view
 - [x] Toggleable at runtime and via `--notify` flag
 - [x] macOS native notifications via `osascript` / `notify-send` on Linux
 - [ ] Configurable notification rules (notify on failure only, always, never)
-
-### v1.0 — Standalone Release
-
-Make fully configurable and publishable.
-
 - [ ] Config file (TOML) — pipelines, region, notification prefs
 - [x] Generic SageMaker pipeline support (auto-discover steps)
 - [ ] `cargo install sagecue` via crates.io
-- [ ] CI/CD with GitHub Actions (build, test, release binaries)
+- [x] CI/CD with GitHub Actions (build, test, release binaries)
