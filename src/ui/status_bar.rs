@@ -15,14 +15,18 @@ fn key_span(key: &str, desc: &str) -> Vec<Span<'static>> {
                 .bg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(
-            format!(" {} ", desc),
-            Style::default().fg(Color::Gray),
-        ),
+        Span::styled(format!(" {} ", desc), Style::default().fg(Color::Gray)),
     ]
 }
 
-pub fn draw_monitor_bar(f: &mut Frame, area: Rect, notifications_enabled: bool, watcher_count: usize, is_executing: bool, active_tab: MonitorTab) {
+pub fn draw_monitor_bar(
+    f: &mut Frame,
+    area: Rect,
+    notifications_enabled: bool,
+    watcher_count: usize,
+    is_executing: bool,
+    active_tab: MonitorTab,
+) {
     let mut spans: Vec<Span> = Vec::new();
     spans.extend(key_span("Esc", "Back"));
     spans.extend(key_span("q", "Quit"));
@@ -30,12 +34,16 @@ pub fn draw_monitor_bar(f: &mut Frame, area: Rect, notifications_enabled: bool, 
     spans.extend(key_span("Tab", "Switch"));
     let (logs_style, metrics_style) = match active_tab {
         MonitorTab::Logs => (
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
             Style::default().fg(Color::Rgb(80, 80, 80)),
         ),
         MonitorTab::Metrics => (
             Style::default().fg(Color::Rgb(80, 80, 80)),
-            Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD),
         ),
     };
     spans.push(Span::styled("[Logs]", logs_style));
@@ -59,7 +67,9 @@ pub fn draw_monitor_bar(f: &mut Frame, area: Rect, notifications_enabled: bool, 
     if notifications_enabled {
         spans.push(Span::styled(
             "[ON] ",
-            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
         ));
     } else {
         spans.push(Span::styled(
@@ -70,7 +80,9 @@ pub fn draw_monitor_bar(f: &mut Frame, area: Rect, notifications_enabled: bool, 
     if watcher_count > 0 {
         spans.push(Span::styled(
             format!("Watch: {} ", watcher_count),
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
         ));
     }
 

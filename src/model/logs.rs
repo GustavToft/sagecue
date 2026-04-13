@@ -86,14 +86,15 @@ mod tests {
                 message: format!("line {}", i),
             })
             .collect();
-        viewer
-            .per_step_cache
-            .insert(step.to_string(), LogStreamState {
+        viewer.per_step_cache.insert(
+            step.to_string(),
+            LogStreamState {
                 log_group: "test".to_string(),
                 log_stream: None,
                 entries,
                 next_forward_token: None,
-            });
+            },
+        );
         viewer
     }
 

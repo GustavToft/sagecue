@@ -130,13 +130,7 @@ pub fn spawn_poll_task(
                 // if the SelectExecution screen has set a pipeline name.
                 if !config.list_pipeline_name.is_empty() {
                     let pipeline_name = config.list_pipeline_name.clone();
-                    match sagemaker::list_executions(
-                        &clients.sagemaker,
-                        &pipeline_name,
-                        20,
-                    )
-                    .await
-                    {
+                    match sagemaker::list_executions(&clients.sagemaker, &pipeline_name, 20).await {
                         Ok(executions) => {
                             if result_tx
                                 .send(PollResult::ExecutionList {
@@ -231,18 +225,12 @@ pub fn spawn_poll_task(
                     if let Some(ref job) = step.job_details {
                         let state = log_states
                             .entry(selected_step.clone())
-                            .or_insert_with(|| {
-                                LogStreamState::new(String::new())
-                            });
+                            .or_insert_with(|| LogStreamState::new(String::new()));
 
                         // Discover stream if not yet found
                         if state.log_stream.is_none() {
                             if let Ok(Some(discovered)) =
-                                cloudwatch::discover_log_stream(
-                                    &clients.cloudwatch_logs,
-                                    job,
-                                )
-                                .await
+                                cloudwatch::discover_log_stream(&clients.cloudwatch_logs, job).await
                             {
                                 *state = discovered;
                             }
@@ -251,11 +239,7 @@ pub fn spawn_poll_task(
                         // Fetch new events
                         if state.log_stream.is_some() {
                             if let Ok(entries) =
-                                cloudwatch::fetch_log_events(
-                                    &clients.cloudwatch_logs,
-                                    state,
-                                )
-                                .await
+                                cloudwatch::fetch_log_events(&clients.cloudwatch_logs, state).await
                             {
                                 state.entries.extend(entries);
                             }
@@ -289,7 +273,8 @@ pub fn spawn_poll_task(
                                 Ok(step_metrics) => {
                                     tracing::debug!(
                                         final_count = step_metrics.final_metrics.len(),
-                                        experiment_series_count = step_metrics.experiment_series.len(),
+                                        experiment_series_count =
+                                            step_metrics.experiment_series.len(),
                                         "metrics fetched"
                                     );
 
@@ -314,7 +299,10 @@ pub fn spawn_poll_task(
                 metrics: metrics_out,
             };
 
-            if result_tx.send(PollResult::Monitoring(Box::new(update))).is_err() {
+            if result_tx
+                .send(PollResult::Monitoring(Box::new(update)))
+                .is_err()
+            {
                 break;
             }
         }
@@ -329,31 +317,48 @@ mod tests {
     #[test]
     fn classify_expired_token() {
         let err = anyhow!("ExpiredToken: The security token included in the request is expired");
-        assert!(matches!(classify(&err), PollError::CredentialsExpired { .. }));
+        assert!(matches!(
+            classify(&err),
+            PollError::CredentialsExpired { .. }
+        ));
     }
 
     #[test]
     fn classify_expired_token_exception() {
         let err = anyhow!("ExpiredTokenException: token expired");
-        assert!(matches!(classify(&err), PollError::CredentialsExpired { .. }));
+        assert!(matches!(
+            classify(&err),
+            PollError::CredentialsExpired { .. }
+        ));
     }
 
     #[test]
     fn classify_unrecognized_client() {
-        let err = anyhow!("UnrecognizedClientException: The security token included in the request is invalid");
-        assert!(matches!(classify(&err), PollError::CredentialsExpired { .. }));
+        let err = anyhow!(
+            "UnrecognizedClientException: The security token included in the request is invalid"
+        );
+        assert!(matches!(
+            classify(&err),
+            PollError::CredentialsExpired { .. }
+        ));
     }
 
     #[test]
     fn classify_invalid_client_token_id() {
         let err = anyhow!("InvalidClientTokenId: bad token");
-        assert!(matches!(classify(&err), PollError::CredentialsExpired { .. }));
+        assert!(matches!(
+            classify(&err),
+            PollError::CredentialsExpired { .. }
+        ));
     }
 
     #[test]
     fn classify_credentials_provider_error() {
         let err = anyhow!("CredentialsProviderError: no provider");
-        assert!(matches!(classify(&err), PollError::CredentialsExpired { .. }));
+        assert!(matches!(
+            classify(&err),
+            PollError::CredentialsExpired { .. }
+        ));
     }
 
     #[test]
@@ -363,7 +368,10 @@ mod tests {
         let wrapped = Err::<(), _>(root)
             .context("Failed to describe pipeline execution")
             .unwrap_err();
-        assert!(matches!(classify(&wrapped), PollError::CredentialsExpired { .. }));
+        assert!(matches!(
+            classify(&wrapped),
+            PollError::CredentialsExpired { .. }
+        ));
     }
 
     #[test]

@@ -242,13 +242,15 @@ impl App {
         if let (Some(step_name), Some(stream_state)) =
             (result.log_step_name, result.log_stream_state)
         {
-            self.log_viewer.per_step_cache.insert(step_name, stream_state);
+            self.log_viewer
+                .per_step_cache
+                .insert(step_name, stream_state);
         }
 
-        if let (Some(step_name), Some(step_metrics)) =
-            (result.metrics_step_name, result.metrics)
-        {
-            self.metrics_state.per_step_cache.insert(step_name, step_metrics);
+        if let (Some(step_name), Some(step_metrics)) = (result.metrics_step_name, result.metrics) {
+            self.metrics_state
+                .per_step_cache
+                .insert(step_name, step_metrics);
         }
 
         self.mark_poll_success();
@@ -609,10 +611,7 @@ mod tests {
         app.executions = vec![make_execution("old")];
         app.execution_cursor = 0;
 
-        app.apply_execution_list_result(
-            "p1",
-            vec![make_execution("new1"), make_execution("new2")],
-        );
+        app.apply_execution_list_result("p1", vec![make_execution("new1"), make_execution("new2")]);
 
         assert_eq!(app.executions.len(), 2);
         assert_eq!(app.executions[0].arn, "new1");

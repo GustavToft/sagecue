@@ -103,10 +103,10 @@ fn draw_monitor(f: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(5),  // header
+            Constraint::Length(5),                                 // header
             Constraint::Length(6 + app.steps.len().max(1) as u16), // step table
-            Constraint::Min(5),    // logs
-            Constraint::Length(1), // status bar
+            Constraint::Min(5),                                    // logs
+            Constraint::Length(1),                                 // status bar
         ])
         .split(rest);
 
@@ -121,5 +121,12 @@ fn draw_monitor(f: &mut Frame, app: &mut App) {
         .as_ref()
         .map(|e| e.status == crate::model::execution::ExecutionStatus::Executing)
         .unwrap_or(false);
-    status_bar::draw_monitor_bar(f, chunks[3], app.notifications_enabled, app.background_watcher_count, is_executing, app.active_tab);
+    status_bar::draw_monitor_bar(
+        f,
+        chunks[3],
+        app.notifications_enabled,
+        app.background_watcher_count,
+        is_executing,
+        app.active_tab,
+    );
 }

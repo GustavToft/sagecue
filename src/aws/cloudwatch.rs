@@ -34,10 +34,7 @@ pub async fn discover_log_stream(
     }
 
     // Pick the first matching stream (usually algo-1 for training)
-    let stream_name = streams[0]
-        .log_stream_name()
-        .unwrap_or_default()
-        .to_string();
+    let stream_name = streams[0].log_stream_name().unwrap_or_default().to_string();
 
     let mut state = LogStreamState::new(log_group.to_string());
     state.log_stream = Some(stream_name);
@@ -63,10 +60,7 @@ pub async fn fetch_log_events(
         req = req.next_token(token);
     }
 
-    let resp = req
-        .send()
-        .await
-        .context("Failed to get log events")?;
+    let resp = req.send().await.context("Failed to get log events")?;
 
     let new_token = resp.next_forward_token().map(|t| t.to_string());
     let events: Vec<LogEntry> = resp

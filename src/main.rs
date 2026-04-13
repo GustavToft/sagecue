@@ -112,12 +112,8 @@ async fn run_app(
     let (force_tx, force_rx) = mpsc::unbounded_channel();
 
     // Spawn background polling task
-    let _poll_handle = polling::spawn_poll_task(
-        clients.clone(),
-        config_rx,
-        poll_result_tx,
-        force_rx,
-    );
+    let _poll_handle =
+        polling::spawn_poll_task(clients.clone(), config_rx, poll_result_tx, force_rx);
 
     // Initial load depends on CLI args
     if let Some(ref pipeline_name) = cli.pipeline {

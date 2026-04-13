@@ -1,8 +1,8 @@
+use ratatui::layout::Constraint;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::{Block, Borders, Cell, Row, Table};
 use ratatui::Frame;
-use ratatui::layout::Constraint;
 
 use crate::app::App;
 use crate::model::step::StepStatus;
@@ -69,14 +69,12 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
             Cell::from(""),
         ]);
 
-        let table = Table::new(vec![empty_row], widths)
-            .header(header)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(" Steps ")
-                    .border_style(Style::default().fg(Color::Cyan)),
-            );
+        let table = Table::new(vec![empty_row], widths).header(header).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Steps ")
+                .border_style(Style::default().fg(Color::Cyan)),
+        );
 
         f.render_widget(table, area);
         return;
@@ -117,14 +115,12 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
         })
         .collect();
 
-    let table = Table::new(rows, widths)
-        .header(header)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" Steps ")
-                .border_style(Style::default().fg(Color::Cyan)),
-        );
+    let table = Table::new(rows, widths).header(header).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Steps ")
+            .border_style(Style::default().fg(Color::Cyan)),
+    );
 
     f.render_widget(table, area);
 }

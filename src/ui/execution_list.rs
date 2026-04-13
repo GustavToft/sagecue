@@ -1,8 +1,8 @@
+use ratatui::layout::Constraint;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::{Block, Borders, Cell, Row, Table};
 use ratatui::Frame;
-use ratatui::layout::Constraint;
 
 use crate::app::App;
 use crate::model::execution::ExecutionStatus;
@@ -70,10 +70,7 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
             let color = status_color(&exec.status);
 
             let prefix = if is_selected { "> " } else { "  " };
-            let name = exec
-                .display_name
-                .as_deref()
-                .unwrap_or("<unnamed>");
+            let name = exec.display_name.as_deref().unwrap_or("<unnamed>");
             let started = exec
                 .start_time
                 .map(|t| fmt_local(t, "%Y-%m-%d %H:%M:%S"))
@@ -109,14 +106,12 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
         None => " Pipeline Executions ".to_string(),
     };
 
-    let table = Table::new(rows, widths)
-        .header(header)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(title)
-                .border_style(Style::default().fg(Color::Cyan)),
-        );
+    let table = Table::new(rows, widths).header(header).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(title)
+            .border_style(Style::default().fg(Color::Cyan)),
+    );
 
     f.render_widget(table, area);
 }

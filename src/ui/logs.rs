@@ -57,7 +57,9 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
     let scroll_offset = if app.log_viewer.auto_scroll {
         entries.len().saturating_sub(inner_height)
     } else {
-        app.log_viewer.scroll_offset.min(entries.len().saturating_sub(inner_height))
+        app.log_viewer
+            .scroll_offset
+            .min(entries.len().saturating_sub(inner_height))
     };
 
     let visible_entries = &entries[scroll_offset..entries.len().min(scroll_offset + inner_height)];
@@ -70,10 +72,7 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
                 .unwrap_or_default();
 
             Line::from(vec![
-                Span::styled(
-                    format!("[{}] ", ts),
-                    Style::default().fg(Color::DarkGray),
-                ),
+                Span::styled(format!("[{}] ", ts), Style::default().fg(Color::DarkGray)),
                 Span::raw(&entry.message),
             ])
         })
@@ -96,6 +95,8 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
         .title_bottom(scroll_indicator)
         .border_style(Style::default().fg(Color::Cyan));
 
-    let para = Paragraph::new(lines).block(block).wrap(Wrap { trim: false });
+    let para = Paragraph::new(lines)
+        .block(block)
+        .wrap(Wrap { trim: false });
     f.render_widget(para, area);
 }

@@ -36,7 +36,6 @@ impl ExecutionStatus {
             Self::Unknown(s) => s.as_str(),
         }
     }
-
 }
 
 #[derive(Debug, Clone)]
@@ -75,7 +74,10 @@ mod tests {
 
     #[test]
     fn from_str_unknown_fallback() {
-        assert_eq!(parse("Banana"), ExecutionStatus::Unknown("Banana".to_string()));
+        assert_eq!(
+            parse("Banana"),
+            ExecutionStatus::Unknown("Banana".to_string())
+        );
     }
 
     #[test]

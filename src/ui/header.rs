@@ -33,10 +33,7 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
         }
     };
 
-    let display_name = exec
-        .display_name
-        .as_deref()
-        .unwrap_or("<unnamed>");
+    let display_name = exec.display_name.as_deref().unwrap_or("<unnamed>");
 
     let status_style = Style::default()
         .fg(status_color(&exec.status))

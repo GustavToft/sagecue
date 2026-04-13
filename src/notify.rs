@@ -18,10 +18,7 @@ fn is_step_terminal(status: &StepStatus) -> bool {
 }
 
 fn is_step_active(status: &StepStatus) -> bool {
-    matches!(
-        status,
-        StepStatus::Executing | StepStatus::NotStarted
-    )
+    matches!(status, StepStatus::Executing | StepStatus::NotStarted)
 }
 
 fn is_execution_active(status: &ExecutionStatus) -> bool {
@@ -102,26 +99,20 @@ pub fn spawn_background_watcher(
             tokio::time::sleep(std::time::Duration::from_secs(30)).await;
 
             // Fetch current execution status
-            let execution = match crate::aws::sagemaker::describe_execution(
-                &clients.sagemaker,
-                &execution_arn,
-            )
-            .await
-            {
-                Ok(exec) => exec,
-                Err(_) => continue,
-            };
+            let execution =
+                match crate::aws::sagemaker::describe_execution(&clients.sagemaker, &execution_arn)
+                    .await
+                {
+                    Ok(exec) => exec,
+                    Err(_) => continue,
+                };
 
             // Fetch current steps
-            let steps = match crate::aws::sagemaker::list_steps(
-                &clients.sagemaker,
-                &execution_arn,
-            )
-            .await
-            {
-                Ok(s) => s,
-                Err(_) => continue,
-            };
+            let steps =
+                match crate::aws::sagemaker::list_steps(&clients.sagemaker, &execution_arn).await {
+                    Ok(s) => s,
+                    Err(_) => continue,
+                };
 
             // Detect and send step transition notifications
             let step_events = detect_step_transitions(&prev_steps, &steps);
@@ -210,7 +201,12 @@ mod tests {
         let old = vec![make_step("Train", StepStatus::Executing)];
         let new = vec![make_step("Train", StepStatus::Succeeded)];
         let events = detect_step_transitions(&old, &new);
-        assert_eq!(events, vec![NotificationEvent::StepSucceeded { step_name: "Train".into() }]);
+        assert_eq!(
+            events,
+            vec![NotificationEvent::StepSucceeded {
+                step_name: "Train".into()
+            }]
+        );
     }
 
     #[test]
@@ -218,7 +214,12 @@ mod tests {
         let old = vec![make_step("Train", StepStatus::Executing)];
         let new = vec![make_step("Train", StepStatus::Failed)];
         let events = detect_step_transitions(&old, &new);
-        assert_eq!(events, vec![NotificationEvent::StepFailed { step_name: "Train".into() }]);
+        assert_eq!(
+            events,
+            vec![NotificationEvent::StepFailed {
+                step_name: "Train".into()
+            }]
+        );
     }
 
     #[test]
@@ -226,7 +227,12 @@ mod tests {
         let old = vec![make_step("Eval", StepStatus::NotStarted)];
         let new = vec![make_step("Eval", StepStatus::Stopped)];
         let events = detect_step_transitions(&old, &new);
-        assert_eq!(events, vec![NotificationEvent::StepFailed { step_name: "Eval".into() }]);
+        assert_eq!(
+            events,
+            vec![NotificationEvent::StepFailed {
+                step_name: "Eval".into()
+            }]
+        );
     }
 
     #[test]
@@ -259,8 +265,18 @@ mod tests {
         ];
         let events = detect_step_transitions(&old, &new);
         assert_eq!(events.len(), 2);
-        assert_eq!(events[0], NotificationEvent::StepSucceeded { step_name: "A".into() });
-        assert_eq!(events[1], NotificationEvent::StepFailed { step_name: "B".into() });
+        assert_eq!(
+            events[0],
+            NotificationEvent::StepSucceeded {
+                step_name: "A".into()
+            }
+        );
+        assert_eq!(
+            events[1],
+            NotificationEvent::StepFailed {
+                step_name: "B".into()
+            }
+        );
     }
 
     // --- Execution transitions ---
@@ -270,7 +286,12 @@ mod tests {
         let old = make_execution(ExecutionStatus::Executing);
         let new = make_execution(ExecutionStatus::Succeeded);
         let event = detect_execution_transition(&old, &new, "my-pipeline");
-        assert_eq!(event, Some(NotificationEvent::PipelineSucceeded { pipeline_name: "my-pipeline".into() }));
+        assert_eq!(
+            event,
+            Some(NotificationEvent::PipelineSucceeded {
+                pipeline_name: "my-pipeline".into()
+            })
+        );
     }
 
     #[test]
@@ -278,7 +299,12 @@ mod tests {
         let old = make_execution(ExecutionStatus::Stopping);
         let new = make_execution(ExecutionStatus::Failed);
         let event = detect_execution_transition(&old, &new, "pipe");
-        assert_eq!(event, Some(NotificationEvent::PipelineFailed { pipeline_name: "pipe".into() }));
+        assert_eq!(
+            event,
+            Some(NotificationEvent::PipelineFailed {
+                pipeline_name: "pipe".into()
+            })
+        );
     }
 
     #[test]

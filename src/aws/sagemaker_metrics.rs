@@ -1,8 +1,8 @@
+use crate::model::metrics::ExperimentTimeSeries;
 use anyhow::{Context, Result};
 use aws_sdk_sagemaker::Client as SageMakerClient;
 use aws_sdk_sagemakermetrics::types::{MetricQuery, MetricStatistic, Period, XAxisType};
 use aws_sdk_sagemakermetrics::Client as MetricsClient;
-use crate::model::metrics::ExperimentTimeSeries;
 
 /// Look up the trial component ARN for a training job using its job ARN as source.
 pub async fn find_trial_component_arn(
@@ -93,7 +93,10 @@ async fn discover_metric_names_via_cli(tc_name: &str) -> Result<Vec<String>> {
     let mut names: Vec<String> = Vec::new();
     if let Some(metrics) = json.get("Metrics").and_then(|m| m.as_array()) {
         for metric in metrics {
-            let name = metric.get("MetricName").and_then(|n| n.as_str()).unwrap_or_default();
+            let name = metric
+                .get("MetricName")
+                .and_then(|n| n.as_str())
+                .unwrap_or_default();
             let count = metric.get("Count").and_then(|c| c.as_i64()).unwrap_or(0);
             // Only include metrics that have time-series data (Count > 0) and deduplicate
             if count > 0 && !name.is_empty() && seen.insert(name.to_string()) {

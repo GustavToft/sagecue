@@ -55,7 +55,9 @@ fn handle_select_pipeline(app: &mut App, key: KeyEvent) -> Action {
                 app.loading = true;
                 app.execution_cursor = 0;
                 app.error_message = None;
-                Action::LoadExecutions { pipeline_name: name }
+                Action::LoadExecutions {
+                    pipeline_name: name,
+                }
             } else {
                 Action::None
             }
@@ -226,19 +228,33 @@ mod tests {
 
     #[test]
     fn ctrl_c_quits_from_all_modes() {
-        for mode in [AppMode::SelectPipeline, AppMode::SelectExecution, AppMode::Monitoring] {
+        for mode in [
+            AppMode::SelectPipeline,
+            AppMode::SelectExecution,
+            AppMode::Monitoring,
+        ] {
             let mut app = App::new();
             app.mode = mode;
-            assert!(matches!(handle_key(&mut app, ctrl_c(), false), Action::Quit));
+            assert!(matches!(
+                handle_key(&mut app, ctrl_c(), false),
+                Action::Quit
+            ));
         }
     }
 
     #[test]
     fn q_quits_from_all_modes() {
-        for mode in [AppMode::SelectPipeline, AppMode::SelectExecution, AppMode::Monitoring] {
+        for mode in [
+            AppMode::SelectPipeline,
+            AppMode::SelectExecution,
+            AppMode::Monitoring,
+        ] {
             let mut app = App::new();
             app.mode = mode;
-            assert!(matches!(handle_key(&mut app, key(KeyCode::Char('q')), false), Action::Quit));
+            assert!(matches!(
+                handle_key(&mut app, key(KeyCode::Char('q')), false),
+                Action::Quit
+            ));
         }
     }
 
@@ -248,7 +264,10 @@ mod tests {
     fn select_pipeline_esc_quits() {
         let mut app = App::new();
         app.mode = AppMode::SelectPipeline;
-        assert!(matches!(handle_key(&mut app, key(KeyCode::Esc), false), Action::Quit));
+        assert!(matches!(
+            handle_key(&mut app, key(KeyCode::Esc), false),
+            Action::Quit
+        ));
     }
 
     #[test]
@@ -256,8 +275,16 @@ mod tests {
         let mut app = App::new();
         app.mode = AppMode::SelectPipeline;
         app.pipelines = vec![
-            PipelineSummary { name: "a".into(), description: None, last_execution_time: None },
-            PipelineSummary { name: "b".into(), description: None, last_execution_time: None },
+            PipelineSummary {
+                name: "a".into(),
+                description: None,
+                last_execution_time: None,
+            },
+            PipelineSummary {
+                name: "b".into(),
+                description: None,
+                last_execution_time: None,
+            },
         ];
         handle_key(&mut app, key(KeyCode::Down), false);
         assert_eq!(app.pipeline_cursor, 1);
@@ -269,11 +296,15 @@ mod tests {
     fn select_pipeline_enter_transitions() {
         let mut app = App::new();
         app.mode = AppMode::SelectPipeline;
-        app.pipelines = vec![
-            PipelineSummary { name: "my-pipe".into(), description: None, last_execution_time: None },
-        ];
+        app.pipelines = vec![PipelineSummary {
+            name: "my-pipe".into(),
+            description: None,
+            last_execution_time: None,
+        }];
         let action = handle_key(&mut app, key(KeyCode::Enter), false);
-        assert!(matches!(action, Action::LoadExecutions { pipeline_name } if pipeline_name == "my-pipe"));
+        assert!(
+            matches!(action, Action::LoadExecutions { pipeline_name } if pipeline_name == "my-pipe")
+        );
         assert_eq!(app.mode, AppMode::SelectExecution);
     }
 
@@ -281,7 +312,10 @@ mod tests {
     fn select_pipeline_enter_empty_is_none() {
         let mut app = App::new();
         app.mode = AppMode::SelectPipeline;
-        assert!(matches!(handle_key(&mut app, key(KeyCode::Enter), false), Action::None));
+        assert!(matches!(
+            handle_key(&mut app, key(KeyCode::Enter), false),
+            Action::None
+        ));
     }
 
     // --- SelectExecution ---
@@ -299,7 +333,10 @@ mod tests {
     fn select_execution_esc_quits_with_flag() {
         let mut app = App::new();
         app.mode = AppMode::SelectExecution;
-        assert!(matches!(handle_key(&mut app, key(KeyCode::Esc), true), Action::Quit));
+        assert!(matches!(
+            handle_key(&mut app, key(KeyCode::Esc), true),
+            Action::Quit
+        ));
     }
 
     #[test]
@@ -326,7 +363,9 @@ mod tests {
         app.mode = AppMode::Monitoring;
         app.selected_pipeline_name = Some("pipe".to_string());
         let action = handle_key(&mut app, key(KeyCode::Esc), false);
-        assert!(matches!(action, Action::BackToExecutions { pipeline_name } if pipeline_name == "pipe"));
+        assert!(
+            matches!(action, Action::BackToExecutions { pipeline_name } if pipeline_name == "pipe")
+        );
         assert_eq!(app.mode, AppMode::SelectExecution);
     }
 
@@ -344,14 +383,20 @@ mod tests {
     fn monitoring_s_stops_pipeline() {
         let mut app = App::new();
         app.mode = AppMode::Monitoring;
-        assert!(matches!(handle_key(&mut app, key(KeyCode::Char('S')), false), Action::StopPipeline));
+        assert!(matches!(
+            handle_key(&mut app, key(KeyCode::Char('S')), false),
+            Action::StopPipeline
+        ));
     }
 
     #[test]
     fn monitoring_r_restarts_pipeline() {
         let mut app = App::new();
         app.mode = AppMode::Monitoring;
-        assert!(matches!(handle_key(&mut app, key(KeyCode::Char('R')), false), Action::RestartPipeline));
+        assert!(matches!(
+            handle_key(&mut app, key(KeyCode::Char('R')), false),
+            Action::RestartPipeline
+        ));
     }
 
     #[test]

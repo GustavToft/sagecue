@@ -256,10 +256,7 @@ mod tests {
 
     // --- StepInfo::instance_str ---
 
-    fn make_job_details(
-        instance_type: Option<&str>,
-        instance_count: Option<i32>,
-    ) -> JobDetails {
+    fn make_job_details(instance_type: Option<&str>, instance_count: Option<i32>) -> JobDetails {
         JobDetails {
             job_type: JobType::Training,
             job_name: "job".to_string(),

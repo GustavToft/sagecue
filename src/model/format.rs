@@ -36,7 +36,10 @@ mod tests {
     #[test]
     fn fmt_local_matches_chrono_local() {
         let dt = Utc.with_ymd_and_hms(2026, 4, 10, 12, 34, 56).unwrap();
-        let expected = dt.with_timezone(&Local).format("%Y-%m-%d %H:%M:%S").to_string();
+        let expected = dt
+            .with_timezone(&Local)
+            .format("%Y-%m-%d %H:%M:%S")
+            .to_string();
         assert_eq!(fmt_local(dt, "%Y-%m-%d %H:%M:%S"), expected);
     }
 

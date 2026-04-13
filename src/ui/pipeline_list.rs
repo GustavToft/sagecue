@@ -56,10 +56,7 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
             let is_selected = i == app.pipeline_cursor;
 
             let prefix = if is_selected { "> " } else { "  " };
-            let description = pipeline
-                .description
-                .as_deref()
-                .unwrap_or("--");
+            let description = pipeline.description.as_deref().unwrap_or("--");
             let last_run = pipeline
                 .last_execution_time
                 .map(|t| fmt_local(t, "%Y-%m-%d %H:%M:%S"))

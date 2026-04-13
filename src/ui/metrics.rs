@@ -87,8 +87,8 @@ pub fn draw(f: &mut Frame, app: &mut App, area: Rect) {
 
         // Left panel: selector + optional final metrics
         if has_final {
-            let final_height = (step_metrics.final_metrics.len() as u16 + 2)
-                .min(chunks[0].height / 2);
+            let final_height =
+                (step_metrics.final_metrics.len() as u16 + 2).min(chunks[0].height / 2);
             let left_chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([Constraint::Min(3), Constraint::Length(final_height)])
@@ -105,13 +105,7 @@ pub fn draw(f: &mut Frame, app: &mut App, area: Rect) {
     }
 }
 
-fn draw_selector(
-    f: &mut Frame,
-    app: &App,
-    _step_name: &str,
-    series_names: &[String],
-    area: Rect,
-) {
+fn draw_selector(f: &mut Frame, app: &App, _step_name: &str, series_names: &[String], area: Rect) {
     let step_name = app.selected_step_name().unwrap_or_default();
     let step_metrics = app.metrics_state.metrics_for_step(step_name);
     let cursor = app.metrics_state.metrics_cursor;
@@ -158,13 +152,7 @@ fn draw_selector(
     f.render_widget(para, area);
 }
 
-fn draw_chart(
-    f: &mut Frame,
-    app: &App,
-    step_name: &str,
-    series_names: &[String],
-    area: Rect,
-) {
+fn draw_chart(f: &mut Frame, app: &App, step_name: &str, series_names: &[String], area: Rect) {
     let step_metrics = app.metrics_state.metrics_for_step(step_name);
 
     // Build data for checked series
@@ -203,10 +191,18 @@ fn draw_chart(
 
     for (_, _, points) in &checked_series {
         for &(x, y) in points {
-            if x < x_min { x_min = x; }
-            if x > x_max { x_max = x; }
-            if y < y_min { y_min = y; }
-            if y > y_max { y_max = y; }
+            if x < x_min {
+                x_min = x;
+            }
+            if x > x_max {
+                x_max = x;
+            }
+            if y < y_min {
+                y_min = y;
+            }
+            if y > y_max {
+                y_max = y;
+            }
         }
     }
 
@@ -299,10 +295,7 @@ fn draw_final_metrics(
                     format!("{:>12.6}", m.value),
                     Style::default().fg(Color::Yellow),
                 ),
-                Span::styled(
-                    format!("  {}", ts),
-                    Style::default().fg(Color::DarkGray),
-                ),
+                Span::styled(format!("  {}", ts), Style::default().fg(Color::DarkGray)),
             ])
         })
         .collect();
