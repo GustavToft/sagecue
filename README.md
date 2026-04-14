@@ -104,6 +104,10 @@ sagecue --pipeline my-pipeline --region us-east-1
 - [ ] Pipeline definition viewer — render the exact JSON that ran for a given execution via `DescribePipelineDefinitionForExecution`, as a new monitoring tab
 - [ ] Model package browser — for `RegisterModel` steps, surface `DescribeModelPackage` status, metrics, and S3 artifacts
 - [ ] Tagging on pipelines/executions (`AddTags`/`DeleteTags`) for cost allocation and lifecycle workflows
+- [ ] Run diff — pick two executions and see a side-by-side: param changes, per-step duration deltas, metric deltas, and a log diff for steps that ran differently
+- [ ] Live cost counter — instance type × elapsed time × pricing → a `$` per step and per run, ticking up in real time so slow steps hurt visibly
+- [ ] AI failure summarizer — pipe the last few hundred lines of a failed step's logs through Claude on demand for a 2-sentence "what broke and what to check"
+- [ ] Pipeline DAG view — render the step graph as ASCII art with status colors and dependency arrows instead of a flat list, so parallel branches and fan-in are obvious
 - [x] Stop a running execution
 - [x] Retry a failed execution
 - [ ] Action picker UI — confirmation dialog before destructive operations
