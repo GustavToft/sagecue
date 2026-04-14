@@ -260,31 +260,12 @@ async fn run_app(
                             }
                         }
                     }
-                    Action::RestartPipeline => {
-                        let pipeline_name = app
-                            .execution
-                            .as_ref()
-                            .and_then(|e| e.pipeline_arn.as_deref())
-                            .and_then(|arn| arn.rsplit('/').next())
-                            .map(|s| s.to_string());
-
-                        if let Some(name) = pipeline_name {
-                            match aws::sagemaker::start_pipeline_execution(
-                                &clients.sagemaker,
-                                &name,
-                                Vec::new(),
-                            )
-                            .await
+                    Action::RetryPipeline => {
+                        if let Some(ref arn) = current_monitoring_arn {
+                            match aws::sagemaker::retry_pipeline_execution(&clients.sagemaker, arn)
+                                .await
                             {
-                                Ok(new_arn) => {
-                                    let step_name = app.enter_monitoring(&new_arn);
-                                    current_monitoring_arn = Some(new_arn.clone());
-                                    config_tx.send_modify(|c| {
-                                        c.execution_arn = new_arn;
-                                        c.selected_step = step_name;
-                                        c.metrics_tab_active = false;
-                                        c.list_pipeline_name = String::new();
-                                    });
+                                Ok(()) => {
                                     let _ = force_tx.send(());
                                 }
                                 Err(e) => {

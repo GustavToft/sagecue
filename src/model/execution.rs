@@ -48,7 +48,6 @@ pub struct ExecutionSummary {
 
 #[derive(Debug, Clone)]
 pub struct PipelineExecution {
-    pub pipeline_arn: Option<String>,
     pub display_name: Option<String>,
     pub status: ExecutionStatus,
     pub created: Option<DateTime<Utc>>,

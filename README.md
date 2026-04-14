@@ -98,6 +98,12 @@ sagecue --pipeline my-pipeline --region us-east-1
 - [ ] Artifact browser — list models/files a run produced without digging through S3
 - [x] Start a new execution (with parameter overrides)
 - [ ] Friendlier AWS error messages — raw `ValidationException` / SDK errors are hard to read; extract the human-readable reason and hide the wire-format noise
+- [ ] Selective execution — start a run that executes only a chosen subset of steps (`SelectiveExecutionConfig`), reusing prior artifacts for the rest
+- [ ] Execution display name / description on start — let users label runs ("debugging X") instead of relying on the UUID
+- [ ] Filter executions by status in the browser (`ListPipelineExecutions` status filter) — usable history on pipelines with hundreds of runs
+- [ ] Pipeline definition viewer — render the exact JSON that ran for a given execution via `DescribePipelineDefinitionForExecution`, as a new monitoring tab
+- [ ] Model package browser — for `RegisterModel` steps, surface `DescribeModelPackage` status, metrics, and S3 artifacts
+- [ ] Tagging on pipelines/executions (`AddTags`/`DeleteTags`) for cost allocation and lifecycle workflows
 - [x] Stop a running execution
 - [x] Retry a failed execution
 - [ ] Action picker UI — confirmation dialog before destructive operations

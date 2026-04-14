@@ -22,7 +22,7 @@ pub enum Action {
     BackToPipelines,
     ToggleNotifications,
     StopPipeline,
-    RestartPipeline,
+    RetryPipeline,
     OpenStartExecutionEditor {
         pipeline_name: String,
     },
@@ -245,7 +245,7 @@ fn handle_monitoring(app: &mut App, key: KeyEvent) -> Action {
         }
         KeyCode::Char('n') => Action::ToggleNotifications,
         KeyCode::Char('S') => Action::StopPipeline,
-        KeyCode::Char('R') => Action::RestartPipeline,
+        KeyCode::Char('R') => Action::RetryPipeline,
         _ => Action::None,
     }
 }
@@ -466,7 +466,7 @@ mod tests {
         app.mode = AppMode::Monitoring;
         assert!(matches!(
             handle_key(&mut app, key(KeyCode::Char('R')), false),
-            Action::RestartPipeline
+            Action::RetryPipeline
         ));
     }
 

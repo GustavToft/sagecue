@@ -447,7 +447,6 @@ mod tests {
     fn make_monitoring_update(steps: Vec<StepInfo>) -> MonitoringUpdate {
         MonitoringUpdate {
             execution: PipelineExecution {
-                pipeline_arn: None,
                 display_name: None,
                 status: ExecutionStatus::Executing,
                 created: None,
