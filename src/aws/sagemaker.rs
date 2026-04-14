@@ -75,7 +75,6 @@ pub async fn describe_execution(client: &Client, execution_arn: &str) -> Result<
         .context("Failed to describe pipeline execution")?;
 
     Ok(PipelineExecution {
-        pipeline_arn: resp.pipeline_arn().map(|s| s.to_string()),
         display_name: resp
             .pipeline_execution_display_name()
             .map(|s| s.to_string()),
@@ -97,6 +96,21 @@ pub async fn stop_pipeline_execution(client: &Client, execution_arn: &str) -> Re
         .send()
         .await
         .context("Failed to stop pipeline execution")?;
+    Ok(())
+}
+
+/// Resume a failed or stopped pipeline execution from the failing step.
+/// Unlike start, this does not create a new execution — the same ARN resumes
+/// in place, reusing successful steps' artifacts.
+pub async fn retry_pipeline_execution(client: &Client, execution_arn: &str) -> Result<()> {
+    let token = uuid::Uuid::new_v4().to_string();
+    client
+        .retry_pipeline_execution()
+        .pipeline_execution_arn(execution_arn)
+        .client_request_token(token)
+        .send()
+        .await
+        .context("Failed to retry pipeline execution")?;
     Ok(())
 }
 

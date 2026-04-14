@@ -62,7 +62,7 @@ pub fn draw_monitor_bar(
     if is_executing {
         spans.extend(key_span("S", "Stop"));
     }
-    spans.extend(key_span("R", "Restart"));
+    spans.extend(key_span("R", "Retry"));
     spans.extend(key_span("n", "Notify"));
     if notifications_enabled {
         spans.push(Span::styled(
