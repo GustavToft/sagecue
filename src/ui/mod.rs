@@ -105,10 +105,16 @@ fn draw_monitor(f: &mut Frame, app: &mut App) {
     if let Some(ref err) = app.last_poll_error {
         draw_error_banner(f, banner, err);
     }
+    let header_has_params = app
+        .execution
+        .as_ref()
+        .map(|e| !e.parameters.is_empty())
+        .unwrap_or(false);
+    let header_height: u16 = if header_has_params { 6 } else { 5 };
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(5),                                 // header
+            Constraint::Length(header_height),                     // header
             Constraint::Length(6 + app.steps.len().max(1) as u16), // step table
             Constraint::Min(5),                                    // logs
             Constraint::Length(1),                                 // status bar

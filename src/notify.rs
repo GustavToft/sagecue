@@ -190,6 +190,7 @@ mod tests {
             status,
             created: None,
             last_modified: None,
+            parameters: std::collections::BTreeMap::new(),
         }
     }
 

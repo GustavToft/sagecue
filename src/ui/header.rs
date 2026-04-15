@@ -59,7 +59,7 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
         StaleLevel::Stale => Some(" (stale)"),
     };
 
-    let lines = vec![
+    let mut lines = vec![
         Line::from(vec![
             Span::styled("Pipeline: ", Style::default().fg(Color::Cyan)),
             Span::raw(app.selected_pipeline_name.as_deref().unwrap_or("<unknown>")),
@@ -88,6 +88,19 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
             spans
         }),
     ];
+
+    if !exec.parameters.is_empty() {
+        let joined = exec
+            .parameters
+            .iter()
+            .map(|(k, v)| format!("{}={}", k, v))
+            .collect::<Vec<_>>()
+            .join(", ");
+        lines.push(Line::from(vec![
+            Span::styled("Params: ", Style::default().fg(Color::Cyan)),
+            Span::raw(joined),
+        ]));
+    }
 
     let block = Block::default()
         .borders(Borders::ALL)

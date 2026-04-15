@@ -111,6 +111,8 @@ pub fn spawn_poll_task(
         let mut job_detail_cache: std::collections::HashMap<String, JobDetails> =
             std::collections::HashMap::new();
         let mut last_arn = String::new();
+        let mut cached_parameters: std::collections::BTreeMap<String, String> =
+            std::collections::BTreeMap::new();
 
         loop {
             // Wait for next tick or force refresh
@@ -154,6 +156,7 @@ pub fn spawn_poll_task(
             if arn != last_arn {
                 log_states.clear();
                 job_detail_cache.clear();
+                cached_parameters.clear();
                 last_arn = arn.clone();
             }
 
@@ -167,13 +170,23 @@ pub fn spawn_poll_task(
             );
 
             // Poll SageMaker
-            let execution = match sagemaker::describe_execution(&clients.sagemaker, &arn).await {
+            let mut execution = match sagemaker::describe_execution(&clients.sagemaker, &arn).await
+            {
                 Ok(e) => e,
                 Err(e) => {
                     let _ = result_tx.send(PollResult::Error(classify(&e)));
                     continue;
                 }
             };
+
+            // Parameters are immutable per execution — fetch once, reuse.
+            if cached_parameters.is_empty() {
+                match sagemaker::fetch_execution_parameters(&clients.sagemaker, &arn).await {
+                    Ok(params) => cached_parameters = params,
+                    Err(e) => tracing::warn!(error = %e, "failed to fetch execution parameters"),
+                }
+            }
+            execution.parameters = cached_parameters.clone();
 
             let mut steps = match sagemaker::list_steps(&clients.sagemaker, &arn).await {
                 Ok(s) => s,

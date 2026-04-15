@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use chrono::{DateTime, Utc};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,6 +54,7 @@ pub struct PipelineExecution {
     pub status: ExecutionStatus,
     pub created: Option<DateTime<Utc>>,
     pub last_modified: Option<DateTime<Utc>>,
+    pub parameters: BTreeMap<String, String>,
 }
 
 #[cfg(test)]
