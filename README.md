@@ -99,7 +99,7 @@ PRs welcome. Two rules enforced by CI:
 
 Example: `feat: add run diff view`
 
-**2. Version is bumped automatically on merge.** A GitHub Action reads the squash-merged commit (your PR title), bumps `Cargo.toml`, commits `chore: bump version to X.Y.Z [skip ci]`, and tags `vX.Y.Z`. Don't bump the version manually in your PR.
+**2. Version bumps are automated via a follow-up PR.** On merge to main, a GitHub Action parses your PR title and — for `feat!`, `feat`, or `fix` — opens a `chore: bump version to X.Y.Z` PR with the updated `Cargo.toml` and `Cargo.lock`. Merge that PR and the workflow runs again, this time tagging `vX.Y.Z`. Don't bump the version manually in your feature PR.
 
 ---
 
