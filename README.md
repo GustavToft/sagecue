@@ -84,6 +84,25 @@ sagecue --pipeline my-pipeline --region us-east-1
 
 ---
 
+## Contributing
+
+PRs welcome. Two rules enforced by CI:
+
+**1. PR titles must start with one of these prefixes:**
+
+| Prefix   | Meaning                      | Version bump on merge |
+|----------|------------------------------|------------------------|
+| `feat!:` | Breaking change              | major (1.2.3 → 2.0.0)  |
+| `feat:`  | New feature                  | minor (1.2.3 → 1.3.0)  |
+| `fix:`   | Bug fix                      | patch (1.2.3 → 1.2.4)  |
+| `chore:` | Refactor, docs, deps, CI…    | no bump                |
+
+Example: `feat: add run diff view`
+
+**2. Version is bumped automatically on merge.** A GitHub Action reads the squash-merged commit (your PR title), bumps `Cargo.toml`, commits `chore: bump version to X.Y.Z [skip ci]`, and tags `vX.Y.Z`. Don't bump the version manually in your PR.
+
+---
+
 ## Improvements
 
 - [ ] `sagecue run` — start a pipeline execution from the shell (with optional parameter overrides)
