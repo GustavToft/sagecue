@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use anyhow::{Context, Result};
 use aws_sdk_sagemaker::Client;
@@ -84,7 +84,26 @@ pub async fn describe_execution(client: &Client, execution_arn: &str) -> Result<
             .unwrap_or(ExecutionStatus::Unknown("Unknown".to_string())),
         created: resp.creation_time().and_then(to_chrono),
         last_modified: resp.last_modified_time().and_then(to_chrono),
+        parameters: BTreeMap::new(),
     })
+}
+
+pub async fn fetch_execution_parameters(
+    client: &Client,
+    execution_arn: &str,
+) -> Result<BTreeMap<String, String>> {
+    let resp = client
+        .list_pipeline_parameters_for_execution()
+        .pipeline_execution_arn(execution_arn)
+        .send()
+        .await
+        .context("Failed to list parameters for execution")?;
+
+    Ok(resp
+        .pipeline_parameters()
+        .iter()
+        .filter_map(|p| Some((p.name()?.to_string(), p.value()?.to_string())))
+        .collect())
 }
 
 pub async fn stop_pipeline_execution(client: &Client, execution_arn: &str) -> Result<()> {
