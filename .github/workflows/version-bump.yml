@@ -1,0 +1,75 @@
+name: Version Bump
+
+on:
+  push:
+    branches: ["main"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: version-bump
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determine bump kind
+        id: kind
+        run: |
+          MSG=$(git log -1 --pretty=%s)
+          echo "msg=$MSG" >> "$GITHUB_OUTPUT"
+          if echo "$MSG" | grep -Eq '^feat!: '; then
+            echo "bump=major" >> "$GITHUB_OUTPUT"
+          elif echo "$MSG" | grep -Eq '^feat: '; then
+            echo "bump=minor" >> "$GITHUB_OUTPUT"
+          elif echo "$MSG" | grep -Eq '^fix: '; then
+            echo "bump=patch" >> "$GITHUB_OUTPUT"
+          else
+            echo "bump=none" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compute next version
+        if: steps.kind.outputs.bump != 'none'
+        id: ver
+        run: |
+          CUR=$(grep -m1 '^version = ' Cargo.toml | sed -E 's/version = "(.*)"/\1/')
+          IFS=. read -r MA MI PA <<< "$CUR"
+          case "${{ steps.kind.outputs.bump }}" in
+            major) MA=$((MA+1)); MI=0; PA=0 ;;
+            minor) MI=$((MI+1)); PA=0 ;;
+            patch) PA=$((PA+1)) ;;
+          esac
+          NEW="$MA.$MI.$PA"
+          echo "current=$CUR" >> "$GITHUB_OUTPUT"
+          echo "next=$NEW" >> "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.kind.outputs.bump != 'none'
+
+      - uses: Swatinem/rust-cache@v2
+        if: steps.kind.outputs.bump != 'none'
+
+      - name: Bump Cargo.toml and Cargo.lock
+        if: steps.kind.outputs.bump != 'none'
+        run: |
+          sed -i -E "0,/^version = \".*\"/s//version = \"${{ steps.ver.outputs.next }}\"/" Cargo.toml
+          cargo update -p sagecue --precise ${{ steps.ver.outputs.next }} || cargo generate-lockfile
+
+      - name: Commit, tag, and push
+        if: steps.kind.outputs.bump != 'none'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml Cargo.lock
+          git commit -m "chore: bump version to ${{ steps.ver.outputs.next }} [skip ci]"
+          git tag "v${{ steps.ver.outputs.next }}"
+          git push origin main
+          git push origin "v${{ steps.ver.outputs.next }}"

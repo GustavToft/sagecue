@@ -1,0 +1,19 @@
+name: PR Title
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PR title prefix
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          if ! echo "$TITLE" | grep -Eq '^(feat!|feat|fix|chore): .+'; then
+            echo "::error::PR title must start with 'feat!: ', 'feat: ', 'fix: ', or 'chore: '"
+            echo "Got: $TITLE"
+            exit 1
+          fi
