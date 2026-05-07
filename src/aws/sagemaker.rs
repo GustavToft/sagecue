@@ -84,6 +84,7 @@ pub async fn describe_execution(client: &Client, execution_arn: &str) -> Result<
             .unwrap_or(ExecutionStatus::Unknown("Unknown".to_string())),
         created: resp.creation_time().and_then(to_chrono),
         last_modified: resp.last_modified_time().and_then(to_chrono),
+        failure_reason: resp.failure_reason().map(|r| r.to_string()),
         parameters: BTreeMap::new(),
     })
 }

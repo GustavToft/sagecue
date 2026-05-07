@@ -451,6 +451,7 @@ mod tests {
                 status: ExecutionStatus::Executing,
                 created: None,
                 last_modified: None,
+                failure_reason: None,
                 parameters: std::collections::BTreeMap::new(),
             },
             steps,

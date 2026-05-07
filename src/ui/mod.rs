@@ -110,7 +110,13 @@ fn draw_monitor(f: &mut Frame, app: &mut App) {
         .as_ref()
         .map(|e| !e.parameters.is_empty())
         .unwrap_or(false);
-    let header_height: u16 = if header_has_params { 6 } else { 5 };
+    let failure_lines: u16 = app
+        .execution
+        .as_ref()
+        .and_then(|e| e.failure_reason.as_ref())
+        .map(|r| header::failure_chunks(r, rest.width).len() as u16)
+        .unwrap_or(0);
+    let header_height: u16 = 5 + if header_has_params { 1 } else { 0 } + failure_lines;
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([

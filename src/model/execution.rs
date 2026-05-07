@@ -54,6 +54,7 @@ pub struct PipelineExecution {
     pub status: ExecutionStatus,
     pub created: Option<DateTime<Utc>>,
     pub last_modified: Option<DateTime<Utc>>,
+    pub failure_reason: Option<String>,
     pub parameters: BTreeMap<String, String>,
 }
 
