@@ -102,6 +102,23 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
         ]));
     }
 
+    if let Some(reason) = &exec.failure_reason {
+        let chunks = failure_chunks(reason, area.width);
+        let mut iter = chunks.into_iter();
+        if let Some(first) = iter.next() {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    FAILURE_PREFIX,
+                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(first),
+            ]));
+        }
+        for chunk in iter {
+            lines.push(Line::from(Span::raw(chunk)));
+        }
+    }
+
     let block = Block::default()
         .borders(Borders::ALL)
         .title(" Pipeline Monitor ")
@@ -109,4 +126,94 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
 
     let para = Paragraph::new(lines).block(block);
     f.render_widget(para, area);
+}
+
+const FAILURE_PREFIX: &str = "Failure: ";
+
+/// Pre-wrap a pipeline-level failure reason into chunks that fit the header
+/// area's inner width. The first chunk leaves room for the "Failure: " prefix
+/// span; subsequent chunks use the full inner width. Newlines in the source
+/// reason are preserved as line breaks. Returning the chunks (rather than
+/// relying on `Paragraph` wrap) lets the layout pre-compute the exact header
+/// height in `ui::draw_monitor`.
+pub fn failure_chunks(reason: &str, area_width: u16) -> Vec<String> {
+    let inner = (area_width.saturating_sub(2) as usize).max(FAILURE_PREFIX.len() + 1);
+    let first_max = inner.saturating_sub(FAILURE_PREFIX.len()).max(1);
+
+    let mut out = Vec::new();
+    let mut on_first = true;
+
+    for source_line in reason.split('\n') {
+        let chars: Vec<char> = source_line.chars().collect();
+        if chars.is_empty() {
+            out.push(String::new());
+            on_first = false;
+            continue;
+        }
+        let mut i = 0;
+        while i < chars.len() {
+            let max = if on_first { first_max } else { inner };
+            on_first = false;
+            let end = (i + max).min(chars.len());
+            out.push(chars[i..end].iter().collect::<String>());
+            i = end;
+        }
+    }
+
+    if out.is_empty() {
+        out.push(String::new());
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn short_reason_one_chunk() {
+        let chunks = failure_chunks("boom", 80);
+        assert_eq!(chunks, vec!["boom".to_string()]);
+    }
+
+    #[test]
+    fn first_chunk_accounts_for_prefix() {
+        // inner_width = 20 - 2 = 18; first_max = 18 - "Failure: ".len() (9) = 9
+        let chunks = failure_chunks("0123456789abcdef", 20);
+        assert_eq!(chunks[0], "012345678");
+        assert_eq!(chunks[1], "9abcdef");
+    }
+
+    #[test]
+    fn wraps_long_reason_across_lines() {
+        let reason = "a".repeat(100);
+        let chunks = failure_chunks(&reason, 30);
+        // first line carries prefix → 30 - 2 - 9 = 19 chars
+        // subsequent lines use full inner = 28 chars
+        assert_eq!(chunks[0].len(), 19);
+        assert_eq!(chunks[1].len(), 28);
+        let total: usize = chunks.iter().map(|c| c.len()).sum();
+        assert_eq!(total, 100);
+    }
+
+    #[test]
+    fn preserves_explicit_newlines() {
+        let chunks = failure_chunks("first\nsecond", 80);
+        assert_eq!(chunks, vec!["first".to_string(), "second".to_string()]);
+    }
+
+    #[test]
+    fn empty_reason_yields_one_blank_line() {
+        let chunks = failure_chunks("", 80);
+        assert_eq!(chunks, vec![String::new()]);
+    }
+
+    #[test]
+    fn copes_with_tiny_area_width() {
+        // area_width too small to fit prefix → falls back to a 1-char body.
+        let chunks = failure_chunks("xyz", 4);
+        assert!(!chunks.is_empty());
+        let total: usize = chunks.iter().map(|c| c.chars().count()).sum();
+        assert_eq!(total, 3);
+    }
 }
