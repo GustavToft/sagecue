@@ -2,10 +2,10 @@ use std::time::Duration;
 use tokio::sync::{mpsc, watch};
 
 use crate::aws::client::AwsClients;
-use crate::aws::{cloudwatch, sagemaker};
+use crate::aws::{cloudwatch, cloudwatch_metrics, sagemaker};
 use crate::model::execution::{ExecutionSummary, PipelineExecution};
 use crate::model::logs::LogStreamState;
-use crate::model::metrics::StepMetrics;
+use crate::model::metrics::{StepMetrics, UtilizationMetrics};
 use crate::model::step::{JobDetails, JobType, StepInfo, StepStatus};
 
 /// Configuration sent from the main loop to the poll task via a single watch channel.
@@ -19,6 +19,7 @@ pub struct PollConfig {
     pub execution_arn: String,
     pub selected_step: String,
     pub metrics_tab_active: bool,
+    pub instance_tab_active: bool,
     pub list_pipeline_name: String,
 }
 
@@ -31,6 +32,8 @@ pub struct MonitoringUpdate {
     pub log_stream_state: Option<LogStreamState>,
     pub metrics_step_name: Option<String>,
     pub metrics: Option<StepMetrics>,
+    pub utilization_step_name: Option<String>,
+    pub utilization: Option<UtilizationMetrics>,
 }
 
 /// Classification of a poll error. Credential/expiration errors are surfaced
@@ -162,10 +165,12 @@ pub fn spawn_poll_task(
 
             let selected_step = config.selected_step;
             let metrics_tab_active = config.metrics_tab_active;
+            let instance_tab_active = config.instance_tab_active;
 
             tracing::debug!(
                 step = %selected_step,
                 metrics_tab = metrics_tab_active,
+                instance_tab = instance_tab_active,
                 "poll tick"
             );
 
@@ -303,6 +308,52 @@ pub fn spawn_poll_task(
                 }
             }
 
+            // Fetch CloudWatch instance utilization when Instance tab is active.
+            // Works for any step that has job_details (Training/Processing/Transform);
+            // namespace selection happens inside the fetch function.
+            let mut utilization_step_name = None;
+            let mut utilization_out = None;
+
+            if instance_tab_active && !selected_step.is_empty() {
+                if let Some(step) = steps.iter().find(|s| s.name == selected_step) {
+                    if let Some(ref job) = step.job_details {
+                        tracing::debug!(
+                            job_name = %job.job_name,
+                            job_type = ?job.job_type,
+                            start = ?step.start_time,
+                            end = ?step.end_time,
+                            "fetching instance utilization"
+                        );
+                        match cloudwatch_metrics::fetch_instance_utilization(
+                            &clients.cloudwatch,
+                            cloudwatch_metrics::UtilizationRequest {
+                                job_type: job.job_type.clone(),
+                                job_name: &job.job_name,
+                                instance_type: job.instance_type.as_deref(),
+                                instance_count: job.instance_count,
+                                step_start: step.start_time,
+                                step_end: step.end_time,
+                                fallback_window: Duration::from_secs(15 * 60),
+                            },
+                        )
+                        .await
+                        {
+                            Ok(util) => {
+                                tracing::debug!(
+                                    series_count = util.series.len(),
+                                    "instance utilization fetched"
+                                );
+                                utilization_step_name = Some(selected_step.clone());
+                                utilization_out = Some(util);
+                            }
+                            Err(e) => {
+                                tracing::warn!(error = %e, "instance metrics fetch failed");
+                            }
+                        }
+                    }
+                }
+            }
+
             let update = MonitoringUpdate {
                 execution,
                 steps,
@@ -310,6 +361,8 @@ pub fn spawn_poll_task(
                 log_stream_state: log_stream_state_out,
                 metrics_step_name,
                 metrics: metrics_out,
+                utilization_step_name,
+                utilization: utilization_out,
             };
 
             if result_tx

@@ -28,6 +28,24 @@ pub struct StepMetrics {
     pub experiment_series: Vec<ExperimentTimeSeries>,
 }
 
+/// CloudWatch utilization time-series for one host of a SageMaker job.
+/// X-axis is wall-clock time; values are percent (note: `CPUUtilization` and
+/// `GPUUtilization` are summed across cores/GPUs, so a 4-vCPU box reads 0-400%).
+#[derive(Debug, Clone)]
+pub struct UtilizationSeries {
+    pub metric_name: String,
+    pub points: Vec<(DateTime<Utc>, f64)>,
+}
+
+/// Aggregate utilization snapshot for a step, with the instance metadata
+/// captured at fetch time so the renderer can label / decide GPU-or-not.
+#[derive(Debug, Clone, Default)]
+pub struct UtilizationMetrics {
+    pub series: Vec<UtilizationSeries>,
+    pub instance_type: Option<String>,
+    pub instance_count: Option<i32>,
+}
+
 #[derive(Debug)]
 pub struct MetricsState {
     pub per_step_cache: HashMap<String, StepMetrics>,

@@ -199,6 +199,7 @@ fn handle_monitoring(app: &mut App, key: KeyEvent) -> Action {
                     let max = metrics_series_count(app);
                     app.metrics_state.cursor_down(max);
                 }
+                MonitorTab::Instance => {}
             }
             Action::None
         }
@@ -210,6 +211,7 @@ fn handle_monitoring(app: &mut App, key: KeyEvent) -> Action {
                 MonitorTab::Metrics => {
                     app.metrics_state.cursor_up();
                 }
+                MonitorTab::Instance => {}
             }
             Action::None
         }

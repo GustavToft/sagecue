@@ -1,5 +1,6 @@
 pub mod execution_list;
 pub mod header;
+pub mod instance;
 pub mod logs;
 pub mod metrics;
 pub mod parameter_editor;
@@ -132,6 +133,7 @@ fn draw_monitor(f: &mut Frame, app: &mut App) {
     match app.active_tab {
         MonitorTab::Logs => logs::draw(f, app, chunks[2]),
         MonitorTab::Metrics => metrics::draw(f, app, chunks[2]),
+        MonitorTab::Instance => instance::draw(f, app, chunks[2]),
     }
     let is_executing = app
         .execution
