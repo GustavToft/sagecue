@@ -1,6 +1,8 @@
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::widgets::{Block, Borders, Paragraph, Sparkline};
+use ratatui::symbols::Marker;
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Axis, Block, Borders, Chart, Dataset, GraphType, Paragraph};
 use ratatui::Frame;
 
 use crate::app::App;
@@ -23,6 +25,17 @@ fn short_label(metric: &str) -> &'static str {
     }
 }
 
+fn color_for(metric: &str) -> Color {
+    match metric {
+        "CPUUtilization" => Color::Cyan,
+        "MemoryUtilization" => Color::Magenta,
+        "DiskUtilization" => Color::Yellow,
+        "GPUUtilization" => Color::LightGreen,
+        "GPUMemoryUtilization" => Color::LightMagenta,
+        _ => Color::White,
+    }
+}
+
 fn title_for(step_name: &str, util: Option<&UtilizationMetrics>) -> String {
     let mut title = format!(" Instance: {} ", step_name);
     if let Some(u) = util {
@@ -31,7 +44,7 @@ fn title_for(step_name: &str, util: Option<&UtilizationMetrics>) -> String {
         }
         if let Some(n) = u.instance_count {
             if n > 1 {
-                title.pop(); // remove trailing space
+                title.pop();
                 title.push_str(&format!("(algo-1 of {}) ", n));
             }
         }
@@ -89,7 +102,9 @@ pub fn draw(f: &mut Frame, app: &mut App, area: Rect) {
         return;
     }
 
-    // Each row: 1 line label + remaining sparkline. Distribute rows evenly.
+    // Shared X bounds across all series so they line up visually.
+    let (x_min, x_max) = shared_x_bounds(&visible);
+
     let constraints: Vec<Constraint> = visible
         .iter()
         .map(|_| Constraint::Ratio(1, visible.len() as u32))
@@ -100,11 +115,32 @@ pub fn draw(f: &mut Frame, app: &mut App, area: Rect) {
         .split(inner);
 
     for (series, row) in visible.iter().zip(rows.iter()) {
-        draw_row(f, series, *row);
+        draw_row(f, series, *row, x_min, x_max);
     }
 }
 
-fn draw_row(f: &mut Frame, series: &UtilizationSeries, area: Rect) {
+fn shared_x_bounds(visible: &[&UtilizationSeries]) -> (f64, f64) {
+    let mut x_min = f64::MAX;
+    let mut x_max = f64::MIN;
+    for s in visible {
+        for (t, _) in &s.points {
+            let x = t.timestamp() as f64;
+            if x < x_min {
+                x_min = x;
+            }
+            if x > x_max {
+                x_max = x;
+            }
+        }
+    }
+    if x_min == f64::MAX || x_min >= x_max {
+        (0.0, 1.0)
+    } else {
+        (x_min, x_max)
+    }
+}
+
+fn draw_row(f: &mut Frame, series: &UtilizationSeries, area: Rect, x_min: f64, x_max: f64) {
     if area.height == 0 {
         return;
     }
@@ -114,49 +150,62 @@ fn draw_row(f: &mut Frame, series: &UtilizationSeries, area: Rect) {
         .split(area);
 
     let latest = series.points.last().map(|(_, v)| *v).unwrap_or(0.0);
+    let peak = series.points.iter().map(|(_, v)| *v).fold(0.0f64, f64::max);
     let suffix = if is_summed(&series.metric_name) {
         " (summed)"
     } else {
         ""
     };
-    let label = format!(
-        "{:<11} {:>6.1}%{}",
-        short_label(&series.metric_name),
-        latest,
-        suffix
-    );
-    let label_para = Paragraph::new(label).style(
-        Style::default()
-            .fg(Color::White)
-            .add_modifier(Modifier::BOLD),
-    );
-    f.render_widget(label_para, split[0]);
+    let color = color_for(&series.metric_name);
 
-    let data: Vec<u64> = series
+    let header = Line::from(vec![
+        Span::styled(
+            format!("{:<11}", short_label(&series.metric_name)),
+            Style::default().fg(color).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!(" now {:>6.1}%", latest),
+            Style::default().fg(Color::White),
+        ),
+        Span::styled(
+            format!(" peak {:>6.1}%{}", peak, suffix),
+            Style::default().fg(Color::Rgb(140, 140, 140)),
+        ),
+    ]);
+    f.render_widget(Paragraph::new(header), split[0]);
+
+    let data: Vec<(f64, f64)> = series
         .points
         .iter()
-        .map(|(_, v)| v.max(0.0).round() as u64)
+        .map(|(t, v)| (t.timestamp() as f64, *v))
         .collect();
-    let max = data.iter().copied().max().unwrap_or(1).max(1);
+    let y_max = if peak <= 0.0 { 1.0 } else { peak * 1.05 };
 
-    let color = match series.metric_name.as_str() {
-        "CPUUtilization" => Color::Cyan,
-        "MemoryUtilization" => Color::Magenta,
-        "DiskUtilization" => Color::Yellow,
-        "GPUUtilization" => Color::LightGreen,
-        "GPUMemoryUtilization" => Color::LightMagenta,
-        _ => Color::White,
-    };
-    let spark = Sparkline::default()
-        .data(&data)
-        .max(max)
-        .style(Style::default().fg(color));
-    f.render_widget(spark, split[1]);
+    let dataset = Dataset::default()
+        .marker(Marker::Braille)
+        .graph_type(GraphType::Line)
+        .style(Style::default().fg(color))
+        .data(&data);
+
+    let chart = Chart::new(vec![dataset])
+        .x_axis(
+            Axis::default()
+                .style(Style::default().fg(Color::Rgb(60, 60, 60)))
+                .bounds([x_min, x_max]),
+        )
+        .y_axis(
+            Axis::default()
+                .style(Style::default().fg(Color::Rgb(60, 60, 60)))
+                .bounds([0.0, y_max]),
+        );
+
+    f.render_widget(chart, split[1]);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::{TimeZone, Utc};
 
     #[test]
     fn is_summed_only_cpu_and_gpu() {
@@ -199,5 +248,36 @@ mod tests {
         let t = title_for("S", Some(&util));
         assert!(!t.contains("algo-1 of"));
         assert!(t.contains("ml.m5.large"));
+    }
+
+    fn series(name: &str, points: &[(i64, f64)]) -> UtilizationSeries {
+        UtilizationSeries {
+            metric_name: name.to_string(),
+            points: points
+                .iter()
+                .map(|&(s, v)| (Utc.timestamp_opt(s, 0).single().unwrap(), v))
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn shared_x_bounds_spans_all_series() {
+        let a = series("CPUUtilization", &[(100, 10.0), (200, 20.0)]);
+        let b = series("MemoryUtilization", &[(150, 5.0), (300, 8.0)]);
+        let refs: Vec<&UtilizationSeries> = vec![&a, &b];
+        let (x_min, x_max) = shared_x_bounds(&refs);
+        assert_eq!(x_min, 100.0);
+        assert_eq!(x_max, 300.0);
+    }
+
+    #[test]
+    fn shared_x_bounds_handles_empty_and_degenerate() {
+        let empty: Vec<&UtilizationSeries> = vec![];
+        assert_eq!(shared_x_bounds(&empty), (0.0, 1.0));
+
+        let single = series("CPUUtilization", &[(42, 1.0)]);
+        let refs: Vec<&UtilizationSeries> = vec![&single];
+        // Only one timestamp → degenerate range → fallback.
+        assert_eq!(shared_x_bounds(&refs), (0.0, 1.0));
     }
 }
