@@ -177,12 +177,17 @@ async fn run_app(
         if app.mode == AppMode::Monitoring {
             let step = app.selected_step_name().unwrap_or_default().to_string();
             let want_metrics = app.active_tab == MonitorTab::Metrics;
+            let want_instance = app.active_tab == MonitorTab::Instance;
             let current = config_tx.borrow();
-            if current.selected_step != step || current.metrics_tab_active != want_metrics {
+            if current.selected_step != step
+                || current.metrics_tab_active != want_metrics
+                || current.instance_tab_active != want_instance
+            {
                 drop(current);
                 config_tx.send_modify(|c| {
                     c.selected_step = step;
                     c.metrics_tab_active = want_metrics;
+                    c.instance_tab_active = want_instance;
                 });
             }
         }

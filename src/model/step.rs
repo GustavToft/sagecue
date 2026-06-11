@@ -46,6 +46,16 @@ pub enum JobType {
     Transform,
 }
 
+/// True for instance families that carry NVIDIA GPUs and therefore publish
+/// `GPUUtilization` / `GPUMemoryUtilization` to CloudWatch. We match by family
+/// letter (`p*`, `g*`) which covers ml.p3/p4/p4d/p4de/p5, ml.g4dn/g5/g6. Other
+/// accelerators (e.g. Trainium ml.trn1) do not publish those metrics under
+/// these names and are intentionally classed as non-GPU here.
+pub fn is_gpu_instance(instance_type: &str) -> bool {
+    let family = instance_type.strip_prefix("ml.").unwrap_or(instance_type);
+    matches!(family.as_bytes().first(), Some(b'p') | Some(b'g'))
+}
+
 #[derive(Debug, Clone)]
 pub enum StepType {
     Training,
@@ -299,5 +309,44 @@ mod tests {
         let mut step = make_step("s");
         step.job_details = Some(make_job_details(Some("ml.p3.8xl"), Some(4)));
         assert_eq!(step.instance_str(), "4x ml.p3.8xl");
+    }
+
+    // --- is_gpu_instance ---
+
+    #[test]
+    fn is_gpu_instance_gpu_families() {
+        assert!(is_gpu_instance("ml.p3.8xlarge"));
+        assert!(is_gpu_instance("ml.p4d.24xlarge"));
+        assert!(is_gpu_instance("ml.g4dn.xlarge"));
+        assert!(is_gpu_instance("ml.g5.xlarge"));
+        assert!(is_gpu_instance("ml.g6.12xlarge"));
+    }
+
+    #[test]
+    fn is_gpu_instance_cpu_families() {
+        assert!(!is_gpu_instance("ml.m5.large"));
+        assert!(!is_gpu_instance("ml.c5.xlarge"));
+        assert!(!is_gpu_instance("ml.t3.medium"));
+        assert!(!is_gpu_instance("ml.r5.large"));
+    }
+
+    #[test]
+    fn is_gpu_instance_trainium_is_not_gpu() {
+        // Trainium publishes its own metrics under different names; treat as non-GPU.
+        assert!(!is_gpu_instance("ml.trn1.32xlarge"));
+    }
+
+    #[test]
+    fn is_gpu_instance_handles_missing_prefix() {
+        // Some call sites might pass the raw family without "ml.".
+        assert!(is_gpu_instance("g5.xlarge"));
+        assert!(is_gpu_instance("p3.8xlarge"));
+        assert!(!is_gpu_instance("m5.large"));
+    }
+
+    #[test]
+    fn is_gpu_instance_empty_is_not_gpu() {
+        assert!(!is_gpu_instance(""));
+        assert!(!is_gpu_instance("ml."));
     }
 }

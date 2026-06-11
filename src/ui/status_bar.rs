@@ -32,22 +32,31 @@ pub fn draw_monitor_bar(
     spans.extend(key_span("q", "Quit"));
     spans.extend(key_span("↑↓", "Step"));
     spans.extend(key_span("Tab", "Switch"));
-    let (logs_style, metrics_style) = match active_tab {
-        MonitorTab::Logs => (
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-            Style::default().fg(Color::Rgb(80, 80, 80)),
-        ),
-        MonitorTab::Metrics => (
-            Style::default().fg(Color::Rgb(80, 80, 80)),
-            Style::default()
-                .fg(Color::Magenta)
-                .add_modifier(Modifier::BOLD),
-        ),
+    let dim = Style::default().fg(Color::Rgb(80, 80, 80));
+    let logs_style = if active_tab == MonitorTab::Logs {
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        dim
+    };
+    let metrics_style = if active_tab == MonitorTab::Metrics {
+        Style::default()
+            .fg(Color::Magenta)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        dim
+    };
+    let instance_style = if active_tab == MonitorTab::Instance {
+        Style::default()
+            .fg(Color::Green)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        dim
     };
     spans.push(Span::styled("[Logs]", logs_style));
-    spans.push(Span::styled("[Metrics] ", metrics_style));
+    spans.push(Span::styled("[Metrics]", metrics_style));
+    spans.push(Span::styled("[Instance] ", instance_style));
     match active_tab {
         MonitorTab::Logs => {
             spans.extend(key_span("j/k", "Scroll"));
@@ -58,6 +67,7 @@ pub fn draw_monitor_bar(
             spans.extend(key_span("Space", "Toggle"));
             spans.extend(key_span("a", "All"));
         }
+        MonitorTab::Instance => {}
     }
     if is_executing {
         spans.extend(key_span("S", "Stop"));
