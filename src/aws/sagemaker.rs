@@ -306,6 +306,8 @@ fn extract_step_type_and_job(
                 job_name,
                 job_arn: Some(arn.to_string()),
                 secondary_status: None,
+                status_message: None,
+                managed_spot: None,
                 instance_type: None,
                 instance_count: None,
             }
@@ -321,6 +323,8 @@ fn extract_step_type_and_job(
                 job_name,
                 job_arn: Some(arn.to_string()),
                 secondary_status: None,
+                status_message: None,
+                managed_spot: None,
                 instance_type: None,
                 instance_count: None,
             }
@@ -336,6 +340,8 @@ fn extract_step_type_and_job(
                 job_name,
                 job_arn: Some(arn.to_string()),
                 secondary_status: None,
+                status_message: None,
+                managed_spot: None,
                 instance_type: None,
                 instance_count: None,
             }
@@ -559,6 +565,15 @@ pub async fn enrich_job_details(client: &Client, step: &mut StepInfo) -> Result<
 
             if let Some(ref mut d) = step.job_details {
                 d.secondary_status = resp.secondary_status().map(|s| s.as_str().to_string());
+                // The latest transition carries the explanatory message, e.g.
+                // "Training job waiting for capacity" while AWS finds an
+                // instance. This is the only place that reason is exposed.
+                d.status_message = resp
+                    .secondary_status_transitions()
+                    .last()
+                    .and_then(|t| t.status_message())
+                    .map(|m| m.to_string());
+                d.managed_spot = resp.enable_managed_spot_training();
                 d.instance_type = resp
                     .resource_config()
                     .and_then(|r| r.instance_type().map(|t| t.as_str().to_string()));
