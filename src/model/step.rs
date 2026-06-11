@@ -80,6 +80,13 @@ pub struct JobDetails {
     #[allow(dead_code)]
     pub job_arn: Option<String>,
     pub secondary_status: Option<String>,
+    /// Human-readable message from the latest `SecondaryStatusTransitions`
+    /// entry (training jobs only), e.g. "Training job waiting for capacity".
+    /// More explanatory than the bare `secondary_status` token.
+    pub status_message: Option<String>,
+    /// `EnableManagedSpotTraining` — whether the job is waiting on spot or
+    /// on-demand capacity. The remediation for a capacity wait differs.
+    pub managed_spot: Option<bool>,
     pub instance_type: Option<String>,
     pub instance_count: Option<i32>,
 }
@@ -130,6 +137,11 @@ impl StepInfo {
 
     pub fn detail_str(&self) -> String {
         if let Some(ref details) = self.job_details {
+            // Prefer the explanatory transition message ("Training job waiting
+            // for capacity") over the bare status token ("Pending").
+            if let Some(ref msg) = details.status_message {
+                return msg.clone();
+            }
             if let Some(ref status) = details.secondary_status {
                 return status.clone();
             }
@@ -142,6 +154,42 @@ impl StepInfo {
             return truncated;
         }
         String::new()
+    }
+
+    /// Text for the logs panel when there are no log entries yet.
+    ///
+    /// A training job stuck in a pre-instance state (e.g. `Pending` while AWS
+    /// finds capacity) never creates a CloudWatch stream, so an empty panel
+    /// looks broken. When we have a secondary-status message, surface it along
+    /// with the instance type, capacity kind, and how long we've been waiting
+    /// so the wait is explained rather than silent.
+    pub fn empty_logs_message(&self) -> String {
+        let Some(ref d) = self.job_details else {
+            return "No logs available (step not started or no job)".to_string();
+        };
+
+        let Some(ref msg) = d.status_message else {
+            return "Waiting for log stream...".to_string();
+        };
+
+        let mut parts: Vec<String> = Vec::new();
+        let instance = self.instance_str();
+        if instance != "--" {
+            parts.push(instance);
+        }
+        if let Some(spot) = d.managed_spot {
+            parts.push(if spot { "spot" } else { "on-demand" }.to_string());
+        }
+        if let Some(ref status) = d.secondary_status {
+            parts.push(format!("{} {}", status.to_lowercase(), self.duration_str()));
+        }
+
+        let suffix = if parts.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", parts.join(", "))
+        };
+        format!("No log stream yet — instance not provisioned.\nStatus: \"{msg}\"{suffix}")
     }
 }
 
@@ -212,6 +260,8 @@ mod tests {
             job_name: "job".to_string(),
             job_arn: None,
             secondary_status: Some("Downloading".to_string()),
+            status_message: None,
+            managed_spot: None,
             instance_type: None,
             instance_count: None,
         });
@@ -233,6 +283,83 @@ mod tests {
         let mut step = make_step("s");
         step.failure_reason = Some("short reason".to_string());
         assert_eq!(step.detail_str(), "short reason");
+    }
+
+    #[test]
+    fn detail_str_prefers_status_message_over_secondary_status() {
+        let mut step = make_step("s");
+        step.job_details = Some(JobDetails {
+            job_type: JobType::Training,
+            job_name: "job".to_string(),
+            job_arn: None,
+            secondary_status: Some("Pending".to_string()),
+            status_message: Some("Training job waiting for capacity".to_string()),
+            managed_spot: None,
+            instance_type: None,
+            instance_count: None,
+        });
+        assert_eq!(step.detail_str(), "Training job waiting for capacity");
+    }
+
+    // --- StepInfo::empty_logs_message ---
+
+    #[test]
+    fn empty_logs_message_no_job_details() {
+        let step = make_step("s");
+        assert_eq!(
+            step.empty_logs_message(),
+            "No logs available (step not started or no job)"
+        );
+    }
+
+    #[test]
+    fn empty_logs_message_job_without_status_message() {
+        let mut step = make_step("s");
+        step.job_details = Some(make_job_details(Some("ml.m5.large"), Some(1)));
+        assert_eq!(step.empty_logs_message(), "Waiting for log stream...");
+    }
+
+    #[test]
+    fn empty_logs_message_waiting_for_capacity() {
+        use chrono::Duration;
+        let mut step = make_step("s");
+        step.status = StepStatus::Executing;
+        step.start_time = Some(Utc::now() - Duration::seconds(42 * 60));
+        step.job_details = Some(JobDetails {
+            job_type: JobType::Training,
+            job_name: "job".to_string(),
+            job_arn: None,
+            secondary_status: Some("Pending".to_string()),
+            status_message: Some("Training job waiting for capacity".to_string()),
+            managed_spot: Some(false),
+            instance_type: Some("ml.g5.xlarge".to_string()),
+            instance_count: Some(1),
+        });
+        let msg = step.empty_logs_message();
+        assert!(msg.starts_with("No log stream yet — instance not provisioned."));
+        assert!(msg.contains("Status: \"Training job waiting for capacity\""));
+        assert!(msg.contains("ml.g5.xlarge"));
+        assert!(msg.contains("on-demand"));
+        assert!(msg.contains("pending 42m"));
+    }
+
+    #[test]
+    fn empty_logs_message_spot_capacity() {
+        let mut step = make_step("s");
+        step.job_details = Some(JobDetails {
+            job_type: JobType::Training,
+            job_name: "job".to_string(),
+            job_arn: None,
+            secondary_status: Some("Starting".to_string()),
+            status_message: Some("Preparing the instances for training".to_string()),
+            managed_spot: Some(true),
+            instance_type: Some("ml.g5.xlarge".to_string()),
+            instance_count: Some(2),
+        });
+        let msg = step.empty_logs_message();
+        assert!(msg.contains("2x ml.g5.xlarge"));
+        assert!(msg.contains("spot"));
+        assert!(msg.contains("starting"));
     }
 
     // --- StepInfo::start_time_str ---
@@ -262,6 +389,8 @@ mod tests {
             job_name: "job".to_string(),
             job_arn: None,
             secondary_status: None,
+            status_message: None,
+            managed_spot: None,
             instance_type: instance_type.map(|s| s.to_string()),
             instance_count,
         }

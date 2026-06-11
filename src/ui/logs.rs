@@ -51,14 +51,14 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
             return;
         }
 
-        let msg = if step.and_then(|s| s.job_details.as_ref()).is_some() {
-            "Waiting for log stream..."
-        } else {
-            "No logs available (step not started or no job)"
-        };
+        let msg = step.map_or_else(
+            || "No logs available (step not started or no job)".to_string(),
+            |s| s.empty_logs_message(),
+        );
         let para = Paragraph::new(msg)
             .style(Style::default().fg(Color::DarkGray))
-            .block(block);
+            .block(block)
+            .wrap(Wrap { trim: false });
         f.render_widget(para, logs_area);
         return;
     }
