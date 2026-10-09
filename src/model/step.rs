@@ -39,11 +39,21 @@ impl StepStatus {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JobType {
     Training,
     Processing,
     Transform,
+}
+
+impl JobType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Training => "Training",
+            Self::Processing => "Processing",
+            Self::Transform => "Transform",
+        }
+    }
 }
 
 /// True for instance families that carry NVIDIA GPUs and therefore publish

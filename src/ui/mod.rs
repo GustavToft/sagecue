@@ -1,6 +1,7 @@
 pub mod execution_list;
 pub mod header;
 pub mod instance;
+pub mod job_list;
 pub mod logs;
 pub mod metrics;
 pub mod parameter_editor;
@@ -20,6 +21,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     match app.mode {
         AppMode::SelectPipeline => draw_pipeline_list(f, app),
         AppMode::SelectExecution => draw_execution_list(f, app),
+        AppMode::SelectJob => draw_job_list(f, app),
         AppMode::Monitoring => draw_monitor(f, app),
     }
 
@@ -80,6 +82,24 @@ fn draw_pipeline_list(f: &mut Frame, app: &mut App) {
 
     pipeline_list::draw(f, app, chunks[0]);
     status_bar::draw_pipeline_list_bar(f, chunks[1]);
+}
+
+fn draw_job_list(f: &mut Frame, app: &mut App) {
+    let area = f.area();
+    let (banner, rest) = split_error_banner(area, app.last_poll_error.is_some());
+    if let Some(ref err) = app.last_poll_error {
+        draw_error_banner(f, banner, err);
+    }
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(3),    // job list
+            Constraint::Length(1), // status bar
+        ])
+        .split(rest);
+
+    job_list::draw(f, app, chunks[0]);
+    status_bar::draw_job_list_bar(f, chunks[1]);
 }
 
 fn draw_execution_list(f: &mut Frame, app: &mut App) {
@@ -146,6 +166,7 @@ fn draw_monitor(f: &mut Frame, app: &mut App) {
         app.notifications_enabled,
         app.background_watcher_count,
         is_executing,
+        app.monitored_job.is_none(),
         app.active_tab,
     );
 }

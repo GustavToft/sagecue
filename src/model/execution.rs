@@ -38,6 +38,17 @@ impl ExecutionStatus {
             Self::Unknown(s) => s.as_str(),
         }
     }
+
+    /// Map a standalone job status (`InProgress`, `Completed`, ...) onto the
+    /// pipeline vocabulary so jobs share status colors and completion
+    /// detection with executions.
+    pub fn from_job_status(s: &str) -> Self {
+        match s {
+            "InProgress" => Self::Executing,
+            "Completed" => Self::Succeeded,
+            other => other.parse().unwrap(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -88,6 +99,34 @@ mod tests {
         for variant in ["Executing", "Succeeded", "Failed", "Stopped", "Stopping"] {
             assert_eq!(parse(variant).as_str(), variant);
         }
+    }
+
+    #[test]
+    fn from_job_status_maps_job_vocabulary() {
+        assert_eq!(
+            ExecutionStatus::from_job_status("InProgress"),
+            ExecutionStatus::Executing
+        );
+        assert_eq!(
+            ExecutionStatus::from_job_status("Completed"),
+            ExecutionStatus::Succeeded
+        );
+        assert_eq!(
+            ExecutionStatus::from_job_status("Failed"),
+            ExecutionStatus::Failed
+        );
+        assert_eq!(
+            ExecutionStatus::from_job_status("Stopping"),
+            ExecutionStatus::Stopping
+        );
+        assert_eq!(
+            ExecutionStatus::from_job_status("Stopped"),
+            ExecutionStatus::Stopped
+        );
+        assert_eq!(
+            ExecutionStatus::from_job_status("Banana"),
+            ExecutionStatus::Unknown("Banana".to_string())
+        );
     }
 
     #[test]

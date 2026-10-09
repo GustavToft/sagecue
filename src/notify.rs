@@ -8,6 +8,8 @@ pub enum NotificationEvent {
     StepFailed { step_name: String },
     PipelineSucceeded { pipeline_name: String },
     PipelineFailed { pipeline_name: String },
+    JobSucceeded { job_name: String },
+    JobFailed { job_name: String },
 }
 
 fn is_step_terminal(status: &StepStatus) -> bool {
@@ -63,25 +65,38 @@ pub fn detect_step_transitions(old: &[StepInfo], new: &[StepInfo]) -> Vec<Notifi
     events
 }
 
+/// `Some(succeeded)` when a run just went from active to terminal.
+fn finished(old: &ExecutionStatus, new: &ExecutionStatus) -> Option<bool> {
+    if !is_execution_active(old) || !is_execution_terminal(new) {
+        return None;
+    }
+    Some(*new == ExecutionStatus::Succeeded)
+}
+
 pub fn detect_execution_transition(
     old: &PipelineExecution,
     new: &PipelineExecution,
     pipeline_name: &str,
 ) -> Option<NotificationEvent> {
-    if !is_execution_active(&old.status) || !is_execution_terminal(&new.status) {
-        return None;
-    }
-    match new.status {
-        ExecutionStatus::Succeeded => Some(NotificationEvent::PipelineSucceeded {
-            pipeline_name: pipeline_name.to_string(),
-        }),
-        ExecutionStatus::Failed | ExecutionStatus::Stopped => {
-            Some(NotificationEvent::PipelineFailed {
-                pipeline_name: pipeline_name.to_string(),
-            })
-        }
-        _ => None,
-    }
+    let pipeline_name = pipeline_name.to_string();
+    Some(if finished(&old.status, &new.status)? {
+        NotificationEvent::PipelineSucceeded { pipeline_name }
+    } else {
+        NotificationEvent::PipelineFailed { pipeline_name }
+    })
+}
+
+pub fn detect_job_transition(
+    old: &PipelineExecution,
+    new: &PipelineExecution,
+    job_name: &str,
+) -> Option<NotificationEvent> {
+    let job_name = job_name.to_string();
+    Some(if finished(&old.status, &new.status)? {
+        NotificationEvent::JobSucceeded { job_name }
+    } else {
+        NotificationEvent::JobFailed { job_name }
+    })
 }
 
 pub fn spawn_background_watcher(
@@ -156,6 +171,10 @@ pub fn send(event: &NotificationEvent) {
         NotificationEvent::PipelineFailed { pipeline_name } => {
             ("Pipeline Failed".to_string(), pipeline_name.clone())
         }
+        NotificationEvent::JobSucceeded { job_name } => {
+            ("Job Succeeded".to_string(), job_name.clone())
+        }
+        NotificationEvent::JobFailed { job_name } => ("Job Failed".to_string(), job_name.clone()),
     };
 
     std::thread::spawn(move || {
@@ -322,5 +341,38 @@ mod tests {
         let new = make_execution(ExecutionStatus::Executing);
         let event = detect_execution_transition(&old, &new, "pipe");
         assert_eq!(event, None);
+    }
+
+    // --- Job transitions ---
+
+    #[test]
+    fn job_executing_to_succeeded() {
+        let old = make_execution(ExecutionStatus::Executing);
+        let new = make_execution(ExecutionStatus::Succeeded);
+        assert_eq!(
+            detect_job_transition(&old, &new, "my-job"),
+            Some(NotificationEvent::JobSucceeded {
+                job_name: "my-job".into()
+            })
+        );
+    }
+
+    #[test]
+    fn job_stopping_to_stopped() {
+        let old = make_execution(ExecutionStatus::Stopping);
+        let new = make_execution(ExecutionStatus::Stopped);
+        assert_eq!(
+            detect_job_transition(&old, &new, "my-job"),
+            Some(NotificationEvent::JobFailed {
+                job_name: "my-job".into()
+            })
+        );
+    }
+
+    #[test]
+    fn job_already_terminal_no_event() {
+        let old = make_execution(ExecutionStatus::Failed);
+        let new = make_execution(ExecutionStatus::Failed);
+        assert_eq!(detect_job_transition(&old, &new, "my-job"), None);
     }
 }

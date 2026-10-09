@@ -21,12 +21,16 @@ fn status_color(status: &ExecutionStatus) -> Color {
 }
 
 pub fn draw(f: &mut Frame, app: &App, area: Rect) {
+    let title = if app.monitored_job.is_some() {
+        " Job Monitor "
+    } else {
+        " Pipeline Monitor "
+    };
+
     let exec = match &app.execution {
         Some(e) => e,
         None => {
-            let block = Block::default()
-                .borders(Borders::ALL)
-                .title(" Pipeline Monitor ");
+            let block = Block::default().borders(Borders::ALL).title(title);
             let para = Paragraph::new("Loading...").block(block);
             f.render_widget(para, area);
             return;
@@ -59,35 +63,50 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
         StaleLevel::Stale => Some(" (stale)"),
     };
 
-    let mut lines = vec![
-        Line::from(vec![
-            Span::styled("Pipeline: ", Style::default().fg(Color::Cyan)),
-            Span::raw(app.selected_pipeline_name.as_deref().unwrap_or("<unknown>")),
-        ]),
-        Line::from(vec![
-            Span::styled("Execution: ", Style::default().fg(Color::Cyan)),
-            Span::raw(display_name),
-            Span::raw("   "),
-            Span::styled("Status: ", Style::default().fg(Color::Cyan)),
-            Span::styled(exec.status.as_str(), status_style),
-        ]),
-        Line::from({
-            let mut spans = vec![
-                Span::styled("Created: ", Style::default().fg(Color::Cyan)),
-                Span::raw(created_str),
+    let mut lines = match &app.monitored_job {
+        Some(job) => vec![
+            Line::from(vec![
+                Span::styled("Job: ", Style::default().fg(Color::Cyan)),
+                Span::raw(job.name.as_str()),
+            ]),
+            Line::from(vec![
+                Span::styled("Type: ", Style::default().fg(Color::Cyan)),
+                Span::raw(job.job_type.as_str()),
                 Span::raw("   "),
-                Span::styled("Updated: ", Style::default().fg(Color::Cyan)),
-                Span::raw(updated_ago),
-            ];
-            if let Some(marker) = stale_marker {
-                spans.push(Span::styled(
-                    marker,
-                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-                ));
-            }
-            spans
-        }),
-    ];
+                Span::styled("Status: ", Style::default().fg(Color::Cyan)),
+                Span::styled(exec.status.as_str(), status_style),
+            ]),
+        ],
+        None => vec![
+            Line::from(vec![
+                Span::styled("Pipeline: ", Style::default().fg(Color::Cyan)),
+                Span::raw(app.selected_pipeline_name.as_deref().unwrap_or("<unknown>")),
+            ]),
+            Line::from(vec![
+                Span::styled("Execution: ", Style::default().fg(Color::Cyan)),
+                Span::raw(display_name),
+                Span::raw("   "),
+                Span::styled("Status: ", Style::default().fg(Color::Cyan)),
+                Span::styled(exec.status.as_str(), status_style),
+            ]),
+        ],
+    };
+    lines.push(Line::from({
+        let mut spans = vec![
+            Span::styled("Created: ", Style::default().fg(Color::Cyan)),
+            Span::raw(created_str),
+            Span::raw("   "),
+            Span::styled("Updated: ", Style::default().fg(Color::Cyan)),
+            Span::raw(updated_ago),
+        ];
+        if let Some(marker) = stale_marker {
+            spans.push(Span::styled(
+                marker,
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ));
+        }
+        spans
+    }));
 
     if !exec.parameters.is_empty() {
         let joined = exec
@@ -121,7 +140,7 @@ pub fn draw(f: &mut Frame, app: &App, area: Rect) {
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(" Pipeline Monitor ")
+        .title(title)
         .border_style(Style::default().fg(Color::Cyan));
 
     let para = Paragraph::new(lines).block(block);

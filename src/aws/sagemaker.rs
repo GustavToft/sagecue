@@ -1,12 +1,17 @@
 use std::collections::{BTreeMap, HashMap};
 
 use anyhow::{Context, Result};
+use aws_sdk_sagemaker::operation::describe_processing_job::DescribeProcessingJobOutput;
+use aws_sdk_sagemaker::operation::describe_training_job::DescribeTrainingJobOutput;
+use aws_sdk_sagemaker::operation::describe_transform_job::DescribeTransformJobOutput;
+use aws_sdk_sagemaker::types::{SortBy, SortOrder};
 use aws_sdk_sagemaker::Client;
 use aws_sdk_sagemakermetrics::Client as MetricsClient;
 use chrono::{DateTime, Utc};
 
 use crate::aws::sagemaker_metrics;
 use crate::model::execution::{ExecutionStatus, ExecutionSummary, PipelineExecution};
+use crate::model::job::{self, JobDescription, JobRef, JobSummary};
 use crate::model::metrics::{MetricDataPoint, StepMetrics};
 use crate::model::pipeline::{PipelineParameter, PipelineSummary};
 use crate::model::step::{JobDetails, JobType, StepInfo, StepStatus, StepType};
@@ -549,9 +554,8 @@ pub async fn fetch_all_training_metrics(
 }
 
 pub async fn enrich_job_details(client: &Client, step: &mut StepInfo) -> Result<()> {
-    let details = match &step.job_details {
-        Some(d) => d,
-        None => return Ok(()),
+    let Some(ref mut details) = step.job_details else {
+        return Ok(());
     };
 
     match details.job_type {
@@ -562,23 +566,7 @@ pub async fn enrich_job_details(client: &Client, step: &mut StepInfo) -> Result<
                 .send()
                 .await
                 .context("Failed to describe training job")?;
-
-            if let Some(ref mut d) = step.job_details {
-                d.secondary_status = resp.secondary_status().map(|s| s.as_str().to_string());
-                // The latest transition carries the explanatory message, e.g.
-                // "Training job waiting for capacity" while AWS finds an
-                // instance. This is the only place that reason is exposed.
-                d.status_message = resp
-                    .secondary_status_transitions()
-                    .last()
-                    .and_then(|t| t.status_message())
-                    .map(|m| m.to_string());
-                d.managed_spot = resp.enable_managed_spot_training();
-                d.instance_type = resp
-                    .resource_config()
-                    .and_then(|r| r.instance_type().map(|t| t.as_str().to_string()));
-                d.instance_count = resp.resource_config().and_then(|r| r.instance_count());
-            }
+            apply_training_details(details, &resp);
         }
         JobType::Processing => {
             let resp = client
@@ -587,18 +575,7 @@ pub async fn enrich_job_details(client: &Client, step: &mut StepInfo) -> Result<
                 .send()
                 .await
                 .context("Failed to describe processing job")?;
-
-            if let Some(ref mut d) = step.job_details {
-                d.secondary_status = resp.processing_job_status().map(|s| s.as_str().to_string());
-                d.instance_type = resp
-                    .processing_resources()
-                    .and_then(|r| r.cluster_config())
-                    .and_then(|c| c.instance_type().map(|t| t.as_str().to_string()));
-                d.instance_count = resp
-                    .processing_resources()
-                    .and_then(|r| r.cluster_config())
-                    .and_then(|c| c.instance_count());
-            }
+            apply_processing_details(details, &resp);
         }
         JobType::Transform => {
             let resp = client
@@ -607,16 +584,238 @@ pub async fn enrich_job_details(client: &Client, step: &mut StepInfo) -> Result<
                 .send()
                 .await
                 .context("Failed to describe transform job")?;
-
-            if let Some(ref mut d) = step.job_details {
-                d.secondary_status = resp.transform_job_status().map(|s| s.as_str().to_string());
-                d.instance_type = resp
-                    .transform_resources()
-                    .and_then(|r| r.instance_type().map(|t| t.as_str().to_string()));
-                d.instance_count = resp.transform_resources().and_then(|r| r.instance_count());
-            }
+            apply_transform_details(details, &resp);
         }
     }
 
+    Ok(())
+}
+
+fn apply_training_details(d: &mut JobDetails, resp: &DescribeTrainingJobOutput) {
+    d.secondary_status = resp.secondary_status().map(|s| s.as_str().to_string());
+    // The latest transition carries the explanatory message, e.g.
+    // "Training job waiting for capacity" while AWS finds an
+    // instance. This is the only place that reason is exposed.
+    d.status_message = resp
+        .secondary_status_transitions()
+        .last()
+        .and_then(|t| t.status_message())
+        .map(|m| m.to_string());
+    d.managed_spot = resp.enable_managed_spot_training();
+    d.instance_type = resp
+        .resource_config()
+        .and_then(|r| r.instance_type().map(|t| t.as_str().to_string()));
+    d.instance_count = resp.resource_config().and_then(|r| r.instance_count());
+}
+
+fn apply_processing_details(d: &mut JobDetails, resp: &DescribeProcessingJobOutput) {
+    d.secondary_status = resp.processing_job_status().map(|s| s.as_str().to_string());
+    d.instance_type = resp
+        .processing_resources()
+        .and_then(|r| r.cluster_config())
+        .and_then(|c| c.instance_type().map(|t| t.as_str().to_string()));
+    d.instance_count = resp
+        .processing_resources()
+        .and_then(|r| r.cluster_config())
+        .and_then(|c| c.instance_count());
+}
+
+fn apply_transform_details(d: &mut JobDetails, resp: &DescribeTransformJobOutput) {
+    d.secondary_status = resp.transform_job_status().map(|s| s.as_str().to_string());
+    d.instance_type = resp
+        .transform_resources()
+        .and_then(|r| r.instance_type().map(|t| t.as_str().to_string()));
+    d.instance_count = resp.transform_resources().and_then(|r| r.instance_count());
+}
+
+/// List the most recently created training, processing, and transform jobs,
+/// merged newest first. Includes jobs launched by pipelines.
+pub async fn list_recent_jobs(client: &Client, limit: i32) -> Result<Vec<JobSummary>> {
+    let training = async {
+        client
+            .list_training_jobs()
+            .sort_by(SortBy::CreationTime)
+            .sort_order(SortOrder::Descending)
+            .max_results(limit)
+            .send()
+            .await
+            .context("Failed to list training jobs")
+    };
+    let processing = async {
+        client
+            .list_processing_jobs()
+            .sort_by(SortBy::CreationTime)
+            .sort_order(SortOrder::Descending)
+            .max_results(limit)
+            .send()
+            .await
+            .context("Failed to list processing jobs")
+    };
+    let transform = async {
+        client
+            .list_transform_jobs()
+            .sort_by(SortBy::CreationTime)
+            .sort_order(SortOrder::Descending)
+            .max_results(limit)
+            .send()
+            .await
+            .context("Failed to list transform jobs")
+    };
+    let (training, processing, transform) = tokio::try_join!(training, processing, transform)?;
+
+    let mut jobs: Vec<JobSummary> = Vec::new();
+    jobs.extend(
+        training
+            .training_job_summaries()
+            .iter()
+            .map(|j| JobSummary {
+                name: j.training_job_name().unwrap_or_default().to_string(),
+                job_type: JobType::Training,
+                status: job_status(j.training_job_status().map(|s| s.as_str())),
+                created: j.creation_time().and_then(to_chrono),
+                end_time: j.training_end_time().and_then(to_chrono),
+            }),
+    );
+    jobs.extend(
+        processing
+            .processing_job_summaries()
+            .iter()
+            .map(|j| JobSummary {
+                name: j.processing_job_name().unwrap_or_default().to_string(),
+                job_type: JobType::Processing,
+                status: job_status(j.processing_job_status().map(|s| s.as_str())),
+                created: j.creation_time().and_then(to_chrono),
+                end_time: j.processing_end_time().and_then(to_chrono),
+            }),
+    );
+    jobs.extend(
+        transform
+            .transform_job_summaries()
+            .iter()
+            .map(|j| JobSummary {
+                name: j.transform_job_name().unwrap_or_default().to_string(),
+                job_type: JobType::Transform,
+                status: job_status(j.transform_job_status().map(|s| s.as_str())),
+                created: j.creation_time().and_then(to_chrono),
+                end_time: j.transform_end_time().and_then(to_chrono),
+            }),
+    );
+
+    Ok(job::most_recent(jobs, limit as usize))
+}
+
+fn job_status(status: Option<&str>) -> ExecutionStatus {
+    status
+        .map(ExecutionStatus::from_job_status)
+        .unwrap_or(ExecutionStatus::Unknown("Unknown".to_string()))
+}
+
+/// Describe a standalone job with a single Describe*Job call.
+pub async fn describe_job(client: &Client, job: &JobRef) -> Result<JobDescription> {
+    let mut details = JobDetails {
+        job_type: job.job_type.clone(),
+        job_name: job.name.clone(),
+        job_arn: None,
+        secondary_status: None,
+        status_message: None,
+        managed_spot: None,
+        instance_type: None,
+        instance_count: None,
+    };
+
+    let description = match job.job_type {
+        JobType::Training => {
+            let resp = client
+                .describe_training_job()
+                .training_job_name(&job.name)
+                .send()
+                .await
+                .context("Failed to describe training job")?;
+            apply_training_details(&mut details, &resp);
+            details.job_arn = resp.training_job_arn().map(|a| a.to_string());
+            JobDescription {
+                details,
+                status: job_status(resp.training_job_status().map(|s| s.as_str())),
+                created: resp.creation_time().and_then(to_chrono),
+                last_modified: resp.last_modified_time().and_then(to_chrono),
+                end_time: resp.training_end_time().and_then(to_chrono),
+                failure_reason: resp.failure_reason().map(|r| r.to_string()),
+                parameters: resp
+                    .hyper_parameters()
+                    .map(|h| h.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+                    .unwrap_or_default(),
+            }
+        }
+        JobType::Processing => {
+            let resp = client
+                .describe_processing_job()
+                .processing_job_name(&job.name)
+                .send()
+                .await
+                .context("Failed to describe processing job")?;
+            apply_processing_details(&mut details, &resp);
+            details.job_arn = resp.processing_job_arn().map(|a| a.to_string());
+            JobDescription {
+                details,
+                status: job_status(resp.processing_job_status().map(|s| s.as_str())),
+                created: resp.creation_time().and_then(to_chrono),
+                last_modified: resp.last_modified_time().and_then(to_chrono),
+                end_time: resp.processing_end_time().and_then(to_chrono),
+                failure_reason: resp.failure_reason().map(|r| r.to_string()),
+                parameters: BTreeMap::new(),
+            }
+        }
+        JobType::Transform => {
+            let resp = client
+                .describe_transform_job()
+                .transform_job_name(&job.name)
+                .send()
+                .await
+                .context("Failed to describe transform job")?;
+            apply_transform_details(&mut details, &resp);
+            details.job_arn = resp.transform_job_arn().map(|a| a.to_string());
+            JobDescription {
+                details,
+                status: job_status(resp.transform_job_status().map(|s| s.as_str())),
+                created: resp.creation_time().and_then(to_chrono),
+                // Transform jobs don't report a last-modified time.
+                last_modified: None,
+                end_time: resp.transform_end_time().and_then(to_chrono),
+                failure_reason: resp.failure_reason().map(|r| r.to_string()),
+                parameters: BTreeMap::new(),
+            }
+        }
+    };
+
+    Ok(description)
+}
+
+pub async fn stop_job(client: &Client, job: &JobRef) -> Result<()> {
+    match job.job_type {
+        JobType::Training => {
+            client
+                .stop_training_job()
+                .training_job_name(&job.name)
+                .send()
+                .await
+                .context("Failed to stop training job")?;
+        }
+        JobType::Processing => {
+            client
+                .stop_processing_job()
+                .processing_job_name(&job.name)
+                .send()
+                .await
+                .context("Failed to stop processing job")?;
+        }
+        JobType::Transform => {
+            client
+                .stop_transform_job()
+                .transform_job_name(&job.name)
+                .send()
+                .await
+                .context("Failed to stop transform job")?;
+        }
+    }
     Ok(())
 }
