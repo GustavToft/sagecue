@@ -175,7 +175,13 @@ async fn run_app(
 
         // Sync poller config with current app state
         if app.mode == AppMode::Monitoring {
-            let step = app.selected_step_name().unwrap_or_default().to_string();
+            // A job's only step is named after it, so it's known before the
+            // first poll lands.
+            let step = app
+                .selected_step_name()
+                .or(app.monitored_job.as_ref().map(|j| j.name.as_str()))
+                .unwrap_or_default()
+                .to_string();
             let want_metrics = app.active_tab == MonitorTab::Metrics;
             let want_instance = app.active_tab == MonitorTab::Instance;
             let current = config_tx.borrow();
@@ -235,11 +241,57 @@ async fn run_app(
                         app.background_watcher_count = watchers.len();
                         config_tx.send_modify(|c| {
                             c.execution_arn = arn;
+                            c.monitor_job = None;
                             c.selected_step = step_name;
                             c.metrics_tab_active = false;
                             c.list_pipeline_name = String::new();
                         });
                         let _ = force_tx.send(());
+                    }
+                    Action::LoadJobs => {
+                        // The poller fetches the list; the screen shows
+                        // "Loading jobs..." until it lands.
+                        config_tx.send_modify(|c| {
+                            c.execution_arn = String::new();
+                            c.monitor_job = None;
+                            c.list_pipeline_name = String::new();
+                            c.list_jobs = true;
+                        });
+                        let _ = force_tx.send(());
+                    }
+                    Action::StartJobMonitoring { job } => {
+                        config_tx.send_modify(|c| {
+                            c.execution_arn = String::new();
+                            c.selected_step = job.name.clone();
+                            c.monitor_job = Some(job);
+                            c.metrics_tab_active = false;
+                            c.list_jobs = false;
+                        });
+                        let _ = force_tx.send(());
+                    }
+                    Action::BackToJobs => {
+                        config_tx.send_modify(|c| {
+                            c.monitor_job = None;
+                            c.list_jobs = true;
+                        });
+                        let _ = force_tx.send(());
+                    }
+                    Action::StopJob { job } => {
+                        let is_executing = app
+                            .execution
+                            .as_ref()
+                            .map(|e| e.status == ExecutionStatus::Executing)
+                            .unwrap_or(false);
+                        if is_executing {
+                            match aws::sagemaker::stop_job(&clients.sagemaker, &job).await {
+                                Ok(()) => {
+                                    let _ = force_tx.send(());
+                                }
+                                Err(e) => {
+                                    app.error_message = Some(format!("{:#}", e));
+                                }
+                            }
+                        }
                     }
                     Action::StopPipeline => {
                         if let Some(ref arn) = current_monitoring_arn {
@@ -336,7 +388,9 @@ async fn run_app(
                         // stale poll error banner.
                         config_tx.send_modify(|c| {
                             c.execution_arn = String::new();
+                            c.monitor_job = None;
                             c.list_pipeline_name = String::new();
+                            c.list_jobs = false;
                         });
                         app.last_poll_error = None;
                     }

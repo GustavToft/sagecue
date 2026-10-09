@@ -1,6 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::app::{App, AppMode, MonitorTab};
+use crate::model::job::JobRef;
 
 /// Describes a side-effect the main loop should perform after handling a key.
 pub enum Action {
@@ -12,6 +13,14 @@ pub enum Action {
     StartMonitoring {
         arn: String,
         step_name: String,
+    },
+    LoadJobs,
+    StartJobMonitoring {
+        job: JobRef,
+    },
+    BackToJobs,
+    StopJob {
+        job: JobRef,
     },
     StepChanged {
         step_name: String,
@@ -55,6 +64,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent, has_pipeline_flag: bool) -> Acti
     match app.mode {
         AppMode::SelectPipeline => handle_select_pipeline(app, key),
         AppMode::SelectExecution => handle_select_execution(app, key, has_pipeline_flag),
+        AppMode::SelectJob => handle_select_job(app, key),
         AppMode::Monitoring => handle_monitoring(app, key),
     }
 }
@@ -124,6 +134,38 @@ fn handle_select_pipeline(app: &mut App, key: KeyEvent) -> Action {
                 Action::None
             }
         }
+        KeyCode::Tab => {
+            app.enter_select_job();
+            Action::LoadJobs
+        }
+        _ => Action::None,
+    }
+}
+
+fn handle_select_job(app: &mut App, key: KeyEvent) -> Action {
+    match key.code {
+        KeyCode::Esc => Action::Quit,
+        KeyCode::Up => {
+            app.job_cursor_up();
+            Action::None
+        }
+        KeyCode::Down => {
+            app.job_cursor_down();
+            Action::None
+        }
+        KeyCode::Enter => {
+            if let Some(job) = app.selected_job() {
+                let job = job.job_ref();
+                app.enter_job_monitoring(job.clone());
+                Action::StartJobMonitoring { job }
+            } else {
+                Action::None
+            }
+        }
+        KeyCode::Tab => {
+            app.enter_select_pipeline();
+            Action::BackToPipelines
+        }
         _ => Action::None,
     }
 }
@@ -171,6 +213,10 @@ fn handle_select_execution(app: &mut App, key: KeyEvent, has_pipeline_flag: bool
 fn handle_monitoring(app: &mut App, key: KeyEvent) -> Action {
     match key.code {
         KeyCode::Esc => {
+            if app.monitored_job.is_some() {
+                app.enter_select_job();
+                return Action::BackToJobs;
+            }
             let pipeline_name = app.selected_pipeline_name.clone().unwrap_or_default();
             app.enter_select_execution();
             Action::BackToExecutions { pipeline_name }
@@ -246,8 +292,12 @@ fn handle_monitoring(app: &mut App, key: KeyEvent) -> Action {
             Action::None
         }
         KeyCode::Char('n') => Action::ToggleNotifications,
-        KeyCode::Char('S') => Action::StopPipeline,
-        KeyCode::Char('R') => Action::RetryPipeline,
+        KeyCode::Char('S') => match &app.monitored_job {
+            Some(job) => Action::StopJob { job: job.clone() },
+            None => Action::StopPipeline,
+        },
+        // Standalone jobs have no retry API; a new job must be created.
+        KeyCode::Char('R') if app.monitored_job.is_none() => Action::RetryPipeline,
         _ => Action::None,
     }
 }
@@ -274,8 +324,9 @@ fn metrics_series_count(app: &App) -> usize {
 mod tests {
     use super::*;
     use crate::model::execution::{ExecutionStatus, ExecutionSummary};
+    use crate::model::job::JobSummary;
     use crate::model::pipeline::PipelineSummary;
-    use crate::model::step::{StepInfo, StepStatus, StepType};
+    use crate::model::step::{JobType, StepInfo, StepStatus, StepType};
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
@@ -304,6 +355,7 @@ mod tests {
         for mode in [
             AppMode::SelectPipeline,
             AppMode::SelectExecution,
+            AppMode::SelectJob,
             AppMode::Monitoring,
         ] {
             let mut app = App::new();
@@ -320,6 +372,7 @@ mod tests {
         for mode in [
             AppMode::SelectPipeline,
             AppMode::SelectExecution,
+            AppMode::SelectJob,
             AppMode::Monitoring,
         ] {
             let mut app = App::new();
@@ -385,6 +438,73 @@ mod tests {
     fn select_pipeline_enter_empty_is_none() {
         let mut app = App::new();
         app.mode = AppMode::SelectPipeline;
+        assert!(matches!(
+            handle_key(&mut app, key(KeyCode::Enter), false),
+            Action::None
+        ));
+    }
+
+    #[test]
+    fn select_pipeline_tab_switches_to_jobs() {
+        let mut app = App::new();
+        app.mode = AppMode::SelectPipeline;
+        let action = handle_key(&mut app, key(KeyCode::Tab), false);
+        assert!(matches!(action, Action::LoadJobs));
+        assert_eq!(app.mode, AppMode::SelectJob);
+    }
+
+    // --- SelectJob ---
+
+    fn job_ref(name: &str) -> JobRef {
+        JobRef {
+            job_type: JobType::Processing,
+            name: name.to_string(),
+        }
+    }
+
+    fn app_with_jobs() -> App {
+        let mut app = App::new();
+        app.mode = AppMode::SelectJob;
+        app.jobs = vec![JobSummary {
+            name: "job-1".into(),
+            job_type: JobType::Processing,
+            status: ExecutionStatus::Executing,
+            created: None,
+            end_time: None,
+        }];
+        app
+    }
+
+    #[test]
+    fn select_job_tab_switches_to_pipelines() {
+        let mut app = app_with_jobs();
+        let action = handle_key(&mut app, key(KeyCode::Tab), false);
+        assert!(matches!(action, Action::BackToPipelines));
+        assert_eq!(app.mode, AppMode::SelectPipeline);
+    }
+
+    #[test]
+    fn select_job_esc_quits() {
+        let mut app = app_with_jobs();
+        assert!(matches!(
+            handle_key(&mut app, key(KeyCode::Esc), false),
+            Action::Quit
+        ));
+    }
+
+    #[test]
+    fn select_job_enter_starts_job_monitoring() {
+        let mut app = app_with_jobs();
+        let action = handle_key(&mut app, key(KeyCode::Enter), false);
+        assert!(matches!(action, Action::StartJobMonitoring { job } if job == job_ref("job-1")));
+        assert_eq!(app.mode, AppMode::Monitoring);
+        assert_eq!(app.monitored_job, Some(job_ref("job-1")));
+    }
+
+    #[test]
+    fn select_job_enter_empty_is_none() {
+        let mut app = App::new();
+        app.mode = AppMode::SelectJob;
         assert!(matches!(
             handle_key(&mut app, key(KeyCode::Enter), false),
             Action::None
@@ -469,6 +589,36 @@ mod tests {
         assert!(matches!(
             handle_key(&mut app, key(KeyCode::Char('R')), false),
             Action::RetryPipeline
+        ));
+    }
+
+    #[test]
+    fn monitoring_job_esc_goes_back_to_jobs() {
+        let mut app = App::new();
+        app.enter_job_monitoring(job_ref("job-1"));
+        let action = handle_key(&mut app, key(KeyCode::Esc), false);
+        assert!(matches!(action, Action::BackToJobs));
+        assert_eq!(app.mode, AppMode::SelectJob);
+        assert!(app.monitored_job.is_none());
+    }
+
+    #[test]
+    fn monitoring_job_s_stops_job() {
+        let mut app = App::new();
+        app.enter_job_monitoring(job_ref("job-1"));
+        assert!(matches!(
+            handle_key(&mut app, key(KeyCode::Char('S')), false),
+            Action::StopJob { job } if job == job_ref("job-1")
+        ));
+    }
+
+    #[test]
+    fn monitoring_job_r_does_nothing() {
+        let mut app = App::new();
+        app.enter_job_monitoring(job_ref("job-1"));
+        assert!(matches!(
+            handle_key(&mut app, key(KeyCode::Char('R')), false),
+            Action::None
         ));
     }
 
