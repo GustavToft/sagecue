@@ -8,6 +8,7 @@ Real-time TUI monitor for ML pipeline executions on AWS SageMaker.
 
 - **Pipeline browser** — Browse all SageMaker pipelines in your account
 - **Execution browser** — List and select from recent pipeline executions, color-coded by status
+- **Standalone jobs** — `Tab` from the pipeline list to browse recent training, processing, and transform jobs and monitor any one with the same logs, metrics, and instance views
 - **Live step tracking** — Watch pipeline steps progress in real-time with auto-follow on the active step
 - **Log streaming** — Stream CloudWatch logs per step with scrollable history and auto-scroll
 - **Metrics panel** — Final metrics and time-series from SageMaker Experiments rendered as sparklines, with per-step selection
@@ -47,6 +48,15 @@ sagecue --pipeline my-pipeline --region us-east-1
 |-----------|---------------------|
 | `↑` `↓`  | Navigate pipelines  |
 | `Enter`   | View executions     |
+| `Tab`     | Switch to jobs      |
+
+### Job Selection
+
+| Key       | Action                 |
+|-----------|------------------------|
+| `↑` `↓`  | Navigate jobs          |
+| `Enter`   | Monitor job            |
+| `Tab`     | Switch to pipelines    |
 
 ### Execution Selection
 
@@ -68,8 +78,8 @@ sagecue --pipeline my-pipeline --region us-east-1
 | `Space`   | Toggle selected metric (Metrics tab)           |
 | `a`       | Toggle all metrics (Metrics tab)               |
 | `n`       | Toggle desktop notifications                   |
-| `S`       | Stop the running execution                     |
-| `R`       | Retry the current execution                    |
+| `S`       | Stop the running execution or job              |
+| `R`       | Retry the current execution (pipelines only)   |
 
 ## Requirements
 

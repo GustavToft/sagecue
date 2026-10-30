@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 
 use crate::model::execution::{ExecutionSummary, PipelineExecution};
+use crate::model::job::{JobRef, JobSummary};
 use crate::model::logs::LogViewerState;
 use crate::model::metrics::{MetricsState, UtilizationMetrics};
 use crate::model::pipeline::{PipelineParameter, PipelineSummary};
@@ -30,6 +31,7 @@ pub fn stale_level(last_successful_poll: Option<DateTime<Utc>>, now: DateTime<Ut
 pub enum AppMode {
     SelectPipeline,
     SelectExecution,
+    SelectJob,
     Monitoring,
 }
 
@@ -73,6 +75,11 @@ pub struct App {
     pub selected_pipeline_name: Option<String>,
     pub executions: Vec<ExecutionSummary>,
     pub execution_cursor: usize,
+    pub jobs: Vec<JobSummary>,
+    pub job_cursor: usize,
+    /// Set while `Monitoring` a standalone job rather than a pipeline
+    /// execution. The job is shown as a one-step execution.
+    pub monitored_job: Option<JobRef>,
     pub execution: Option<PipelineExecution>,
     pub steps: Vec<StepInfo>,
     pub selected_step: usize,
@@ -104,6 +111,9 @@ impl App {
             selected_pipeline_name: None,
             executions: Vec::new(),
             execution_cursor: 0,
+            jobs: Vec::new(),
+            job_cursor: 0,
+            monitored_job: None,
             execution: None,
             steps: Vec::new(),
             selected_step: 0,
@@ -225,6 +235,22 @@ impl App {
             .map(|e| e.arn.as_str())
     }
 
+    pub fn job_cursor_up(&mut self) {
+        if self.job_cursor > 0 {
+            self.job_cursor -= 1;
+        }
+    }
+
+    pub fn job_cursor_down(&mut self) {
+        if self.job_cursor < self.jobs.len().saturating_sub(1) {
+            self.job_cursor += 1;
+        }
+    }
+
+    pub fn selected_job(&self) -> Option<&JobSummary> {
+        self.jobs.get(self.job_cursor)
+    }
+
     pub fn pipeline_cursor_up(&mut self) {
         if self.pipeline_cursor > 0 {
             self.pipeline_cursor -= 1;
@@ -310,6 +336,7 @@ impl App {
                 pipeline_name,
                 executions,
             } => self.apply_execution_list_result(&pipeline_name, executions),
+            PollResult::JobList { jobs } => self.apply_job_list_result(jobs),
             PollResult::Error(err) => self.apply_poll_error(err),
         }
     }
@@ -317,17 +344,32 @@ impl App {
     /// Apply a monitoring update (steps + logs + metrics for a single execution).
     pub fn apply_monitoring_result(&mut self, result: MonitoringUpdate) {
         if self.notifications_enabled {
-            let step_events = notify::detect_step_transitions(&self.steps, &result.steps);
-            for event in &step_events {
-                notify::send(event);
-            }
+            if let Some(ref job) = self.monitored_job {
+                // A job's lone step mirrors the job itself, so one job-level
+                // alert replaces the step + pipeline pair.
+                if let Some(ref old_exec) = self.execution {
+                    if let Some(event) =
+                        notify::detect_job_transition(old_exec, &result.execution, &job.name)
+                    {
+                        notify::send(&event);
+                    }
+                }
+            } else {
+                let step_events = notify::detect_step_transitions(&self.steps, &result.steps);
+                for event in &step_events {
+                    notify::send(event);
+                }
 
-            if let Some(ref old_exec) = self.execution {
-                let pipeline_name = self.selected_pipeline_name.as_deref().unwrap_or("pipeline");
-                if let Some(event) =
-                    notify::detect_execution_transition(old_exec, &result.execution, pipeline_name)
-                {
-                    notify::send(&event);
+                if let Some(ref old_exec) = self.execution {
+                    let pipeline_name =
+                        self.selected_pipeline_name.as_deref().unwrap_or("pipeline");
+                    if let Some(event) = notify::detect_execution_transition(
+                        old_exec,
+                        &result.execution,
+                        pipeline_name,
+                    ) {
+                        notify::send(&event);
+                    }
                 }
             }
         }
@@ -381,6 +423,19 @@ impl App {
         self.mark_poll_success();
     }
 
+    /// Apply a refreshed standalone jobs list (SelectJob screen polling).
+    pub fn apply_job_list_result(&mut self, jobs: Vec<JobSummary>) {
+        self.jobs = jobs;
+        if self.jobs.is_empty() {
+            self.job_cursor = 0;
+        } else if self.job_cursor >= self.jobs.len() {
+            self.job_cursor = self.jobs.len() - 1;
+        }
+        self.loading = false;
+
+        self.mark_poll_success();
+    }
+
     fn apply_poll_error(&mut self, err: PollError) {
         self.last_poll_error = Some(err);
     }
@@ -393,6 +448,7 @@ impl App {
     /// Transition into monitoring mode. Returns the initial step name for the poller.
     pub fn enter_monitoring(&mut self, _arn: &str) -> String {
         self.mode = AppMode::Monitoring;
+        self.monitored_job = None;
         self.auto_follow = true;
         self.selected_step = 0;
         self.log_viewer = LogViewerState::new();
@@ -400,6 +456,28 @@ impl App {
         self.metrics_state = MetricsState::new();
         self.utilization_cache.clear();
         self.selected_step_name().unwrap_or_default().to_string()
+    }
+
+    /// Transition into monitoring a standalone job. Returns the initial step
+    /// name for the poller, which is the job name.
+    pub fn enter_job_monitoring(&mut self, job: JobRef) -> String {
+        // Drop the previous target: its status would otherwise be diffed
+        // against this job's (spurious completion alert) and its steps drawn
+        // under the job header until the first poll lands.
+        self.execution = None;
+        self.steps.clear();
+        self.enter_monitoring(&job.name);
+        let step_name = job.name.clone();
+        self.monitored_job = Some(job);
+        step_name
+    }
+
+    /// Transition to the standalone jobs list.
+    pub fn enter_select_job(&mut self) {
+        self.mode = AppMode::SelectJob;
+        self.monitored_job = None;
+        self.error_message = None;
+        self.loading = self.jobs.is_empty();
     }
 
     /// Transition back to execution selection.
@@ -422,7 +500,7 @@ mod tests {
     use crate::model::execution::{ExecutionStatus, PipelineExecution};
     use crate::model::logs::LogStreamState;
     use crate::model::pipeline::PipelineSummary;
-    use crate::model::step::{StepInfo, StepStatus, StepType};
+    use crate::model::step::{JobType, StepInfo, StepStatus, StepType};
 
     fn make_step(name: &str, status: StepStatus) -> StepInfo {
         StepInfo {
@@ -799,6 +877,98 @@ mod tests {
         assert_eq!(app.steps.len(), 1);
         assert_eq!(app.mode, AppMode::Monitoring);
         assert!(app.execution.is_none());
+    }
+
+    // --- standalone jobs ---
+
+    fn make_job(name: &str) -> JobSummary {
+        JobSummary {
+            name: name.to_string(),
+            job_type: JobType::Processing,
+            status: ExecutionStatus::Succeeded,
+            created: None,
+            end_time: None,
+        }
+    }
+
+    fn make_job_ref(name: &str) -> JobRef {
+        JobRef {
+            job_type: JobType::Processing,
+            name: name.to_string(),
+        }
+    }
+
+    #[test]
+    fn job_cursor_bounds() {
+        let mut app = App::new();
+        app.jobs = vec![make_job("a"), make_job("b")];
+        app.job_cursor_up();
+        assert_eq!(app.job_cursor, 0);
+        app.job_cursor_down();
+        assert_eq!(app.job_cursor, 1);
+        app.job_cursor_down();
+        assert_eq!(app.job_cursor, 1);
+        assert_eq!(app.selected_job().map(|j| j.name.as_str()), Some("b"));
+    }
+
+    #[test]
+    fn apply_job_list_result_replaces_and_clamps() {
+        let mut app = App::new();
+        app.jobs = vec![make_job("a"), make_job("b"), make_job("c")];
+        app.job_cursor = 2;
+        app.loading = true;
+
+        app.apply_job_list_result(vec![make_job("x")]);
+
+        assert_eq!(app.jobs.len(), 1);
+        assert_eq!(app.job_cursor, 0);
+        assert!(!app.loading);
+        assert!(app.last_successful_poll.is_some());
+    }
+
+    #[test]
+    fn enter_select_job_loads_only_when_empty() {
+        let mut app = App::new();
+        app.loading = false;
+        app.enter_select_job();
+        assert_eq!(app.mode, AppMode::SelectJob);
+        assert!(app.loading);
+
+        app.jobs = vec![make_job("a")];
+        app.loading = false;
+        app.enter_select_job();
+        assert!(!app.loading);
+    }
+
+    #[test]
+    fn enter_job_monitoring_drops_previous_target() {
+        let mut app = App::new();
+        app.steps = vec![make_step("pipeline-step", StepStatus::Executing)];
+        app.execution = Some(make_monitoring_update(vec![]).execution);
+
+        let step_name = app.enter_job_monitoring(make_job_ref("job-1"));
+
+        assert_eq!(step_name, "job-1");
+        assert_eq!(app.mode, AppMode::Monitoring);
+        assert_eq!(app.monitored_job, Some(make_job_ref("job-1")));
+        assert!(app.steps.is_empty());
+        assert!(app.execution.is_none());
+    }
+
+    #[test]
+    fn enter_monitoring_clears_monitored_job() {
+        let mut app = App::new();
+        app.enter_job_monitoring(make_job_ref("job-1"));
+        app.enter_monitoring("arn:exec");
+        assert!(app.monitored_job.is_none());
+    }
+
+    #[test]
+    fn enter_select_job_clears_monitored_job() {
+        let mut app = App::new();
+        app.enter_job_monitoring(make_job_ref("job-1"));
+        app.enter_select_job();
+        assert!(app.monitored_job.is_none());
     }
 
     // --- error state + stale timer ---

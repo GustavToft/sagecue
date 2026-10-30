@@ -23,18 +23,18 @@ cargo test                     # Run unit tests
 
 ## Architecture
 
-**State machine flow:** `SelectPipeline → SelectExecution → Monitoring` (with back navigation).
+**State machine flow:** `SelectPipeline → SelectExecution → Monitoring` (with back navigation). `Tab` on `SelectPipeline` switches to `SelectJob → Monitoring` for standalone training/processing/transform jobs; a monitored job is presented as a one-step execution (`model::job::JobDescription::into_monitor_view`) so the monitor UI is shared, with `App::monitored_job` set.
 
 **Async design:** Tokio runtime with three concurrent concerns:
 - **Event handler** (`event.rs`): Dedicated `std::thread` polling crossterm with a 250ms timeout. Emits `AppEvent::Key` on input and `AppEvent::Tick` on timeout via an mpsc channel. Never touches app state or AWS.
-- **Polling task** (`polling.rs`): Tokio task on a 5-second interval. Dispatches by `PollConfig`: monitor a specific execution (steps + logs + conditional training metrics + one-shot parameters), poll an execution list, or idle. Enriches job details through a per-job cache and classifies errors into `PollError::{CredentialsExpired, Other}`.
+- **Polling task** (`polling.rs`): Tokio task on a 5-second interval. Dispatches by `PollConfig`: monitor a standalone job or a specific execution (steps + logs + conditional training metrics + one-shot parameters), poll an execution list or the recent jobs list, or idle. Enriches job details through a per-job cache and classifies errors into `PollError::{CredentialsExpired, Other}`.
 - **Main loop** (`main.rs`): Redraws each frame, drains poll results into `App`, and translates keys into `handler::Action` side-effects. Frame cadence is bounded by the 250ms event-poll tick, not a fixed fps.
 
 **Channel architecture:**
-- `watch<PollConfig>`: Main → Poller. Fields dispatch behaviour (`execution_arn`, `selected_step`, `metrics_tab_active`, `list_pipeline_name`).
+- `watch<PollConfig>`: Main → Poller. Fields dispatch behaviour (`monitor_job`, `execution_arn`, `selected_step`, `metrics_tab_active`, `instance_tab_active`, `list_pipeline_name`, `list_jobs`).
 - `mpsc<()>` force channel: Main → Poller to trigger an immediate refresh after start/stop/retry.
 - `mpsc<AppEvent>`: Event thread → Main (keys + ticks).
-- `mpsc<PollResult>`: Poller → Main (monitoring update, execution list, or error).
+- `mpsc<PollResult>`: Poller → Main (monitoring update, execution list, job list, or error).
 
 **Key modules:**
 - `app.rs` — `App` struct holding all state; `apply_poll_result` dispatches into typed appliers.
@@ -43,8 +43,8 @@ cargo test                     # Run unit tests
 - `event.rs` — Crossterm reader thread.
 - `notify.rs` — Desktop notifications and background watchers that keep alerting after you leave the monitor view.
 - `aws/` — SDK wrappers: `client.rs` (init), `sagemaker.rs` (pipeline/execution/job APIs), `cloudwatch.rs` (log streaming), `sagemaker_metrics.rs` (training-metrics time series).
-- `model/` — Domain types and formatters: `execution.rs`, `step.rs`, `pipeline.rs`, `logs.rs`, `metrics.rs`, `format.rs`. Status enums (`ExecutionStatus`, `StepStatus`, `StepType`) parse from AWS strings via `FromStr` and fall back to `Unknown(String)`; `ExecutionStatus` additionally carries `Stopping`.
-- `ui/` — One module per region: `header`, `pipeline_list`, `execution_list`, `steps`, `logs`, `metrics`, `status_bar`, `parameter_editor`.
+- `model/` — Domain types and formatters: `execution.rs`, `step.rs`, `job.rs`, `pipeline.rs`, `logs.rs`, `metrics.rs`, `format.rs`. Status enums (`ExecutionStatus`, `StepStatus`, `StepType`) parse from AWS strings via `FromStr` and fall back to `Unknown(String)`; `ExecutionStatus` additionally carries `Stopping`.
+- `ui/` — One module per region: `header`, `pipeline_list`, `execution_list`, `job_list`, `steps`, `logs`, `metrics`, `instance`, `status_bar`, `parameter_editor`.
 
 **Log streaming** keeps per-step state with forward tokens, auto-discovers streams from CloudWatch, and supports auto-scroll with manual override.
 

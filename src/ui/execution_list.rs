@@ -8,7 +8,7 @@ use crate::app::App;
 use crate::model::execution::ExecutionStatus;
 use crate::model::format::fmt_local;
 
-fn status_color(status: &ExecutionStatus) -> Color {
+pub fn status_color(status: &ExecutionStatus) -> Color {
     match status {
         ExecutionStatus::Executing => Color::Yellow,
         ExecutionStatus::Succeeded => Color::Green,

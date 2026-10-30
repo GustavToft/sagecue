@@ -4,7 +4,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
-use crate::app::MonitorTab;
+use crate::app::{AppMode, MonitorTab};
 
 fn key_span(key: &str, desc: &str) -> Vec<Span<'static>> {
     vec![
@@ -25,6 +25,7 @@ pub fn draw_monitor_bar(
     notifications_enabled: bool,
     watcher_count: usize,
     is_executing: bool,
+    can_retry: bool,
     active_tab: MonitorTab,
 ) {
     let mut spans: Vec<Span> = Vec::new();
@@ -72,7 +73,9 @@ pub fn draw_monitor_bar(
     if is_executing {
         spans.extend(key_span("S", "Stop"));
     }
-    spans.extend(key_span("R", "Retry"));
+    if can_retry {
+        spans.extend(key_span("R", "Retry"));
+    }
     spans.extend(key_span("n", "Notify"));
     if notifications_enabled {
         spans.push(Span::styled(
@@ -101,11 +104,41 @@ pub fn draw_monitor_bar(
     f.render_widget(bar, area);
 }
 
+/// `[Pipelines][Jobs]` indicator for the two top-level list screens.
+fn top_level_tabs(mode: AppMode) -> Vec<Span<'static>> {
+    let dim = Style::default().fg(Color::Rgb(80, 80, 80));
+    let active = Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+    let (pipelines, jobs) = if mode == AppMode::SelectJob {
+        (dim, active)
+    } else {
+        (active, dim)
+    };
+    let mut spans = key_span("Tab", "Switch");
+    spans.push(Span::styled("[Pipelines]", pipelines));
+    spans.push(Span::styled("[Jobs] ", jobs));
+    spans
+}
+
 pub fn draw_pipeline_list_bar(f: &mut Frame, area: Rect) {
     let mut spans: Vec<Span> = Vec::new();
     spans.extend(key_span("q", "Quit"));
+    spans.extend(top_level_tabs(AppMode::SelectPipeline));
     spans.extend(key_span("↑↓", "Select"));
     spans.extend(key_span("Enter", "Executions"));
+
+    let line = Line::from(spans);
+    let bar = Paragraph::new(line).style(Style::default().bg(Color::DarkGray));
+    f.render_widget(bar, area);
+}
+
+pub fn draw_job_list_bar(f: &mut Frame, area: Rect) {
+    let mut spans: Vec<Span> = Vec::new();
+    spans.extend(key_span("q", "Quit"));
+    spans.extend(top_level_tabs(AppMode::SelectJob));
+    spans.extend(key_span("↑↓", "Select"));
+    spans.extend(key_span("Enter", "Monitor"));
 
     let line = Line::from(spans);
     let bar = Paragraph::new(line).style(Style::default().bg(Color::DarkGray));

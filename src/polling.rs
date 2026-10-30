@@ -4,6 +4,7 @@ use tokio::sync::{mpsc, watch};
 use crate::aws::client::AwsClients;
 use crate::aws::{cloudwatch, cloudwatch_metrics, sagemaker};
 use crate::model::execution::{ExecutionSummary, PipelineExecution};
+use crate::model::job::{JobRef, JobSummary};
 use crate::model::logs::LogStreamState;
 use crate::model::metrics::{StepMetrics, UtilizationMetrics};
 use crate::model::step::{JobDetails, JobType, StepInfo, StepStatus};
@@ -11,17 +12,24 @@ use crate::model::step::{JobDetails, JobType, StepInfo, StepStatus};
 /// Configuration sent from the main loop to the poll task via a single watch channel.
 ///
 /// The poller dispatches based on which field is populated:
-/// - `execution_arn` non-empty → poll monitoring details for that execution
+/// - `monitor_job` set → poll monitoring details for that standalone job
+/// - else `execution_arn` non-empty → poll monitoring details for that execution
 /// - else `list_pipeline_name` non-empty → poll the execution list for that pipeline
+/// - else `list_jobs` → poll the recent standalone jobs list
 /// - else idle
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PollConfig {
     pub execution_arn: String,
+    pub monitor_job: Option<JobRef>,
     pub selected_step: String,
     pub metrics_tab_active: bool,
     pub instance_tab_active: bool,
     pub list_pipeline_name: String,
+    pub list_jobs: bool,
 }
+
+/// How many recent jobs the Jobs screen shows.
+const JOB_LIST_LIMIT: i32 = 30;
 
 /// Update from a successful monitoring poll.
 #[derive(Debug)]
@@ -63,6 +71,9 @@ pub enum PollResult {
     ExecutionList {
         pipeline_name: String,
         executions: Vec<ExecutionSummary>,
+    },
+    JobList {
+        jobs: Vec<JobSummary>,
     },
     Error(PollError),
 }
@@ -113,7 +124,7 @@ pub fn spawn_poll_task(
         // without re-calling describe_* on every tick.
         let mut job_detail_cache: std::collections::HashMap<String, JobDetails> =
             std::collections::HashMap::new();
-        let mut last_arn = String::new();
+        let mut last_target = String::new();
         let mut cached_parameters: std::collections::BTreeMap<String, String> =
             std::collections::BTreeMap::new();
 
@@ -128,11 +139,10 @@ pub fn spawn_poll_task(
             }
 
             let config = config_rx.borrow().clone();
-            let arn = config.execution_arn;
 
-            if arn.is_empty() {
-                // No monitoring target — fall back to polling the execution list
-                // if the SelectExecution screen has set a pipeline name.
+            if config.monitor_job.is_none() && config.execution_arn.is_empty() {
+                // No monitoring target — fall back to polling whichever list
+                // screen is active.
                 if !config.list_pipeline_name.is_empty() {
                     let pipeline_name = config.list_pipeline_name.clone();
                     match sagemaker::list_executions(&clients.sagemaker, &pipeline_name, 20).await {
@@ -151,16 +161,32 @@ pub fn spawn_poll_task(
                             let _ = result_tx.send(PollResult::Error(classify(&e)));
                         }
                     }
+                } else if config.list_jobs {
+                    match sagemaker::list_recent_jobs(&clients.sagemaker, JOB_LIST_LIMIT).await {
+                        Ok(jobs) => {
+                            if result_tx.send(PollResult::JobList { jobs }).is_err() {
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            let _ = result_tx.send(PollResult::Error(classify(&e)));
+                        }
+                    }
                 }
                 continue;
             }
 
-            // Clear cached state when switching to a different execution
-            if arn != last_arn {
+            // Clear cached state when switching to a different target. Job
+            // names never collide with execution ARNs.
+            let target = match config.monitor_job {
+                Some(ref job) => job.name.clone(),
+                None => config.execution_arn.clone(),
+            };
+            if target != last_target {
                 log_states.clear();
                 job_detail_cache.clear();
                 cached_parameters.clear();
-                last_arn = arn.clone();
+                last_target = target;
             }
 
             let selected_step = config.selected_step;
@@ -174,65 +200,30 @@ pub fn spawn_poll_task(
                 "poll tick"
             );
 
-            // Poll SageMaker
-            let mut execution = match sagemaker::describe_execution(&clients.sagemaker, &arn).await
-            {
-                Ok(e) => e,
-                Err(e) => {
-                    let _ = result_tx.send(PollResult::Error(classify(&e)));
-                    continue;
+            let snapshot = match config.monitor_job {
+                Some(ref job) => sagemaker::describe_job(&clients.sagemaker, job)
+                    .await
+                    .map(|d| {
+                        let (execution, step) = d.into_monitor_view();
+                        (execution, vec![step])
+                    }),
+                None => {
+                    fetch_execution(
+                        &clients,
+                        &config.execution_arn,
+                        &mut cached_parameters,
+                        &mut job_detail_cache,
+                    )
+                    .await
                 }
             };
-
-            // Parameters are immutable per execution — fetch once, reuse.
-            if cached_parameters.is_empty() {
-                match sagemaker::fetch_execution_parameters(&clients.sagemaker, &arn).await {
-                    Ok(params) => cached_parameters = params,
-                    Err(e) => tracing::warn!(error = %e, "failed to fetch execution parameters"),
-                }
-            }
-            execution.parameters = cached_parameters.clone();
-
-            let mut steps = match sagemaker::list_steps(&clients.sagemaker, &arn).await {
+            let (execution, steps) = match snapshot {
                 Ok(s) => s,
                 Err(e) => {
                     let _ = result_tx.send(PollResult::Error(classify(&e)));
                     continue;
                 }
             };
-
-            // Enrich job details:
-            //   - Executing steps: always refresh (for live secondary_status).
-            //   - Terminal steps: enrich once, then reuse from cache so we
-            //     don't hammer describe_* APIs on every tick.
-            // In both cases, update the cache after a successful enrichment
-            // and paste cached data into any step we skipped.
-            for step in &mut steps {
-                let Some(ref details) = step.job_details else {
-                    continue;
-                };
-                let job_name = details.job_name.clone();
-                let is_executing = step.status == StepStatus::Executing;
-                let cached = job_detail_cache.get(&job_name).cloned();
-                let needs_enrich = is_executing || cached.is_none();
-
-                if needs_enrich {
-                    if sagemaker::enrich_job_details(&clients.sagemaker, step)
-                        .await
-                        .is_ok()
-                    {
-                        if let Some(ref d) = step.job_details {
-                            job_detail_cache.insert(job_name, d.clone());
-                        }
-                    } else if let Some(cached_details) = cached {
-                        // Enrichment failed; fall back to cached data if we
-                        // have any rather than showing blanks.
-                        step.job_details = Some(cached_details);
-                    }
-                } else if let Some(cached_details) = cached {
-                    step.job_details = Some(cached_details);
-                }
-            }
 
             // Tail logs for the selected step
             let mut log_step_name = None;
@@ -373,6 +364,62 @@ pub fn spawn_poll_task(
             }
         }
     })
+}
+
+/// Fetch an execution and its steps, with job details enriched.
+async fn fetch_execution(
+    clients: &AwsClients,
+    arn: &str,
+    cached_parameters: &mut std::collections::BTreeMap<String, String>,
+    job_detail_cache: &mut std::collections::HashMap<String, JobDetails>,
+) -> anyhow::Result<(PipelineExecution, Vec<StepInfo>)> {
+    let mut execution = sagemaker::describe_execution(&clients.sagemaker, arn).await?;
+
+    // Parameters are immutable per execution — fetch once, reuse.
+    if cached_parameters.is_empty() {
+        match sagemaker::fetch_execution_parameters(&clients.sagemaker, arn).await {
+            Ok(params) => *cached_parameters = params,
+            Err(e) => tracing::warn!(error = %e, "failed to fetch execution parameters"),
+        }
+    }
+    execution.parameters = cached_parameters.clone();
+
+    let mut steps = sagemaker::list_steps(&clients.sagemaker, arn).await?;
+
+    // Enrich job details:
+    //   - Executing steps: always refresh (for live secondary_status).
+    //   - Terminal steps: enrich once, then reuse from cache so we
+    //     don't hammer describe_* APIs on every tick.
+    // In both cases, update the cache after a successful enrichment
+    // and paste cached data into any step we skipped.
+    for step in &mut steps {
+        let Some(ref details) = step.job_details else {
+            continue;
+        };
+        let job_name = details.job_name.clone();
+        let is_executing = step.status == StepStatus::Executing;
+        let cached = job_detail_cache.get(&job_name).cloned();
+        let needs_enrich = is_executing || cached.is_none();
+
+        if needs_enrich {
+            if sagemaker::enrich_job_details(&clients.sagemaker, step)
+                .await
+                .is_ok()
+            {
+                if let Some(ref d) = step.job_details {
+                    job_detail_cache.insert(job_name, d.clone());
+                }
+            } else if let Some(cached_details) = cached {
+                // Enrichment failed; fall back to cached data if we
+                // have any rather than showing blanks.
+                step.job_details = Some(cached_details);
+            }
+        } else if let Some(cached_details) = cached {
+            step.job_details = Some(cached_details);
+        }
+    }
+
+    Ok((execution, steps))
 }
 
 #[cfg(test)]
