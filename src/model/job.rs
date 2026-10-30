@@ -43,7 +43,7 @@ impl JobSummary {
 /// Keep the `limit` most recently created jobs, newest first. SageMaker lists
 /// each job type separately, so this merges them into one timeline.
 pub fn most_recent(mut jobs: Vec<JobSummary>, limit: usize) -> Vec<JobSummary> {
-    jobs.sort_by(|a, b| b.created.cmp(&a.created));
+    jobs.sort_by_key(|job| std::cmp::Reverse(job.created));
     jobs.truncate(limit);
     jobs
 }
